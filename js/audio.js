@@ -4,6 +4,26 @@
 // variants is seeded so replays sound identical.
 import { RngStream } from './rng.js';
 
+// Authored one-shot samples (sfx/<name>.opus) backing logical events. Each
+// event prefers its mapped clip; the procedural synthesis below remains the
+// fallback while a clip is still loading or unavailable. Player-parameterized
+// events list one clip per seat (index = player - 1). Every basename here
+// matches an entry in sfx/manifest.json.
+const SFX_BY_EVENT = {
+  uiTick: ['ui-tick'],
+  uiBack: ['ui-back'],
+  focus: ['focus'],
+  chalkStroke: ['chalk-stroke-p1', 'chalk-stroke-p2'],
+  placeImpact: ['place-impact-p1', 'place-impact-p2'],
+  invalid: ['invalid'],
+  turnPass: ['turn-pass'],
+  win: ['win'],
+  lose: ['lose'],
+  draw: ['draw'],
+  clockWarning: ['clock-warning'],
+  achievement: ['achievement'],
+};
+
 export class AudioEngine {
   constructor(settings) {
     this.settings = settings;
@@ -15,6 +35,9 @@ export class AudioEngine {
     this.rng = new RngStream(1);
     this.started = false;
     this.suspended = false;
+    // name -> AudioBuffer (ready) | 'loading' | 'error'; filled lazily after
+    // the user-gesture unlock in init(), one fetch per clip.
+    this.sfxCache = new Map();
   }
 
   // Must be called from a user gesture.
@@ -111,22 +134,61 @@ export class AudioEngine {
     this.envelope(gain, t0, peak, attack, decay);
   }
 
+  // ---- authored sample one-shots ----
+
+  sfxName(event, player = 1) {
+    const names = SFX_BY_EVENT[event];
+    if (!names) return null;
+    return names[Math.min(Math.max(player, 1), names.length) - 1];
+  }
+
+  // Plays the cached sample for `name` through the effects bus and returns
+  // true. Otherwise kicks off the lazy fetch/decode (once per clip) and
+  // returns false so the caller runs its procedural fallback.
+  playSfx(name) {
+    if (!this.ctx || this.suspended || !name) return false;
+    const cached = this.sfxCache.get(name);
+    if (cached && typeof cached === 'object') {
+      const src = this.ctx.createBufferSource();
+      src.buffer = cached;
+      src.connect(this.buses.effects);
+      src.start();
+      return true;
+    }
+    if (cached === undefined) {
+      this.sfxCache.set(name, 'loading');
+      fetch(`sfx/${name}.opus`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`sfx ${name}: HTTP ${res.status}`);
+          return res.arrayBuffer();
+        })
+        .then((bytes) => this.ctx.decodeAudioData(bytes))
+        .then((buffer) => this.sfxCache.set(name, buffer))
+        .catch(() => this.sfxCache.set(name, 'error'));
+    }
+    return false;
+  }
+
   // ---- logical event sounds ----
 
   uiTick() {
+    if (this.playSfx(this.sfxName('uiTick'))) return;
     this.burst({ type: 'triangle', freq: 2200, peak: 0.08, attack: 0.002, decay: 0.04 });
   }
 
   uiBack() {
+    if (this.playSfx(this.sfxName('uiBack'))) return;
     this.burst({ type: 'triangle', freq: 1400, pitchEnd: 900, peak: 0.08, attack: 0.002, decay: 0.06 });
   }
 
   focus() {
+    if (this.playSfx(this.sfxName('focus'))) return;
     this.burst({ type: 'sine', freq: 1800, peak: 0.03, attack: 0.002, decay: 0.03 });
   }
 
   // Chalk scratch: band-passed noise with seeded pitch variant.
   chalkStroke(player = 1) {
+    if (this.playSfx(this.sfxName('chalkStroke', player))) return;
     const variant = 1 + (this.rng.next() - 0.5) * 0.25;
     const base = player === 1 ? 2600 : 2100;
     this.burst({ type: 'noise', freq: base * variant, pitchEnd: base * 0.6 * variant, q: 2.5, peak: 0.22, attack: 0.01, decay: 0.22 });
@@ -135,20 +197,24 @@ export class AudioEngine {
 
   // Contact grounding thump under the chalk.
   placeImpact(player = 1) {
+    if (this.playSfx(this.sfxName('placeImpact', player))) return;
     this.chalkStroke(player);
     this.burst({ type: 'sine', freq: player === 1 ? 160 : 130, pitchEnd: 60, peak: 0.25, attack: 0.004, decay: 0.16 });
   }
 
   invalid() {
+    if (this.playSfx(this.sfxName('invalid'))) return;
     this.burst({ type: 'square', freq: 220, pitchEnd: 180, peak: 0.06, attack: 0.004, decay: 0.12 });
   }
 
   turnPass() {
+    if (this.playSfx(this.sfxName('turnPass'))) return;
     this.burst({ type: 'sine', freq: 700, peak: 0.05, attack: 0.004, decay: 0.07 });
   }
 
   win() {
     if (!this.ctx || this.suspended) return;
+    if (this.playSfx(this.sfxName('win'))) return;
     const notes = [523.25, 659.25, 783.99, 1046.5];
     notes.forEach((f, i) => {
       setTimeout(() => this.burst({ type: 'triangle', freq: f, peak: 0.14, attack: 0.01, decay: 0.5 }), i * 110);
@@ -158,22 +224,26 @@ export class AudioEngine {
 
   lose() {
     if (!this.ctx || this.suspended) return;
+    if (this.playSfx(this.sfxName('lose'))) return;
     [392, 330, 262].forEach((f, i) => {
       setTimeout(() => this.burst({ type: 'triangle', freq: f, peak: 0.12, attack: 0.01, decay: 0.45 }), i * 160);
     });
   }
 
   draw() {
+    if (this.playSfx(this.sfxName('draw'))) return;
     this.burst({ type: 'triangle', freq: 440, peak: 0.1, attack: 0.02, decay: 0.4 });
     setTimeout(() => this.burst({ type: 'triangle', freq: 440, peak: 0.08, attack: 0.02, decay: 0.5 }), 220);
   }
 
   clockWarning() {
+    if (this.playSfx(this.sfxName('clockWarning'))) return;
     this.burst({ type: 'sine', freq: 1100, peak: 0.07, attack: 0.003, decay: 0.08 });
   }
 
   achievement() {
     if (!this.ctx || this.suspended) return;
+    if (this.playSfx(this.sfxName('achievement'))) return;
     [880, 1174.7].forEach((f, i) => {
       setTimeout(() => this.burst({ type: 'sine', freq: f, peak: 0.1, attack: 0.01, decay: 0.35 }), i * 130);
     });

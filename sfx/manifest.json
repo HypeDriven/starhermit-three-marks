@@ -1,0 +1,86 @@
+[
+  {
+    "name": "ui-tick",
+    "seconds": 1,
+    "prompt": "A single short dry UI tick, like a small wooden peg tapped once on a slate board, crisp high transient, no reverb.",
+    "event": "uiTick"
+  },
+  {
+    "name": "ui-back",
+    "seconds": 1,
+    "prompt": "A short soft descending wooden tap, like a chalk stick set down on a slate ledge, quick low transient, dry.",
+    "event": "uiBack"
+  },
+  {
+    "name": "focus",
+    "seconds": 1,
+    "prompt": "A very quiet faint glassy ping, like a fingertip touching a small brass bell without ringing it, extremely short and soft.",
+    "event": "focus"
+  },
+  {
+    "name": "chalk-stroke-p1",
+    "seconds": 1,
+    "prompt": "A single chalk stick drawing one short stroke across a rough slate blackboard, bright scratchy high-pitched squeak and grainy texture.",
+    "event": "chalkStroke"
+  },
+  {
+    "name": "chalk-stroke-p2",
+    "seconds": 1,
+    "prompt": "A single chalk stick drawing one short stroke across a rough slate blackboard, slightly lower and duller scratchy drag than a bright stroke.",
+    "event": "chalkStroke"
+  },
+  {
+    "name": "place-impact-p1",
+    "seconds": 1,
+    "prompt": "A chalk stroke on slate ending with a firm tap, bright chalk scratch followed by a soft wooden thump as the stick presses into the board.",
+    "event": "placeImpact"
+  },
+  {
+    "name": "place-impact-p2",
+    "seconds": 1,
+    "prompt": "A dull chalk stroke on slate ending with a firm tap, lower scratchy drag followed by a soft deep wooden thump on the board.",
+    "event": "placeImpact"
+  },
+  {
+    "name": "invalid",
+    "seconds": 1,
+    "prompt": "A short dull rejected buzz, like a knuckle rapping twice quickly on a hollow wooden desk, muted and flat.",
+    "event": "invalid"
+  },
+  {
+    "name": "turn-pass",
+    "seconds": 1,
+    "prompt": "A single gentle finger tap on a wooden table edge, soft neutral mid-pitched knock, dry and brief.",
+    "event": "turnPass"
+  },
+  {
+    "name": "win",
+    "seconds": 2,
+    "prompt": "A short celebratory rising chime sequence, like four small tuned metal bars struck in ascending order with a light shimmering wash at the end.",
+    "event": "win"
+  },
+  {
+    "name": "lose",
+    "seconds": 2,
+    "prompt": "A short somber descending sequence, like three soft muted marimba notes falling stepwise, quiet and resigned.",
+    "event": "lose"
+  },
+  {
+    "name": "draw",
+    "seconds": 2,
+    "prompt": "Two soft neutral bell tones struck one after another at the same pitch, like a small hand bell tapped twice gently, even and unresolved.",
+    "event": "draw"
+  },
+  {
+    "name": "clock-warning",
+    "seconds": 1,
+    "prompt": "A single small clockwork tick-ping, like the escapement of an old mechanical chess clock clicking once sharply.",
+    "event": "clockWarning"
+  },
+  {
+    "name": "achievement",
+    "seconds": 2,
+    "prompt": "A bright two-note sparkle chime, like a tiny glockenspiel struck twice in quick rising steps with a faint shimmering tail.",
+    "event": "achievement"
+  }
+]
