@@ -25,6 +25,11 @@ export class Platform {
     if (typeof fetch === 'undefined' || !location || !/^https?:$/.test(location.protocol)) {
       return { hosted: false, reason: 'offline-context' };
     }
+    // The host shell always launches with a token; without one this is a
+    // static host with no API, so skip the probe instead of hitting a 404.
+    if (!this.launchToken) {
+      return { hosted: false, reason: 'no-launch-token' };
+    }
     try {
       const t0 = Date.now();
       const res = await fetch('/api/v1/time', { headers: this.authHeaders(), signal: timeoutSignal(3000) });
