@@ -13,7 +13,7 @@ evidence.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | no `package.json`; tests live in `test/` (not `tests/`) — `node test/*.test.mjs` → 3 + 4 + 19 + 8 = **34/34 pass** |
+| `npm test` | no `package.json`; tests live in `tests/` (not `tests/`) — `node tests/*.test.mjs` → 3 + 4 + 19 + 8 = **34/34 pass** |
 | `node --check` on all modules | clean (11 `js/*.js` + `server.js`) |
 | `tests/e2e.mjs` (headless Chrome) | not present — substituted a CDP boot check (see *Not tested*): page loads, title "Three Marks", canvas present, **no console errors, no page exceptions** |
 
@@ -76,7 +76,7 @@ Each defect below was reproduced by executing the real modules, not merely repor
   log can never reproduce, because `stateHash` hashes the whole state object.
 - **Expected:** spec §5: "Replay envelope: schema version, build/content version, seed, initial
   hash, timestamp offset, ordered commands, periodic state hashes, terminal result" — the envelope
-  must re-execute. `test/rules.test.mjs:178-202` only exercises a log with no rejected commands, so
+  must re-execute. `tests/rules.test.mjs:178-202` only exercises a log with no rejected commands, so
   the suite passes.
 - **Evidence:** reproducing `commit`'s exact bookkeeping (one legal move, one occupied-cell tap, one
   more legal move):
@@ -92,7 +92,7 @@ Each defect below was reproduced by executing the real modules, not merely repor
 - **Trigger:** look for any way to compare a score against another player's.
 - **Behaviour:** `compareResults` implements the mandated chain (objective completion → fewer
   invalid actions → lower elapsed time → stable session id) and is referenced only by
-  `test/rules.test.mjs`. `grep -rn "compareResults" js/ index.html` returns nothing but its own
+  `tests/rules.test.mjs`. `grep -rn "compareResults" js/ index.html` returns nothing but its own
   definition. There is no Scores/Leaderboard screen: `js/ui.js` routes to `journey`, `lessons`,
   `challenges`, `practice`, `hosted`, `profile`, `achievements`, `settings` and `help` only, and the
   boot check found no scores entry point on the title screen. `js/storage.js` persists settings,
