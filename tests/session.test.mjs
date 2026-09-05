@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GameSession, PHASE } from '../js/session.js';
 import { Store } from '../js/storage.js';
 import { createGame, applyCommand as serverApply, getResult, serialize as serverSerialize, deserialize as serverDeserialize } from '../server.js';
+import { replayEnvelope } from '../js/rules.js';
 import { LESSONS } from '../js/content.js';
 
 import { PracticeAI } from '../js/ai.js';
@@ -153,6 +154,27 @@ test('snapshot round-trip restores an interrupted match', () => {
   assert.equal(restored.phase, PHASE.PAUSED);
   session.clearTimers();
   restored.clearTimers();
+});
+
+test('replay envelope stays valid after an invalid action', () => {
+  // A rejected command still counts an invalid action in authoritative state,
+  // so the replay must record and reproduce it (the accepted-only log could
+  // never match a hash that embedded the invalid count).
+  const { session } = makeSession();
+  session.startMatch({
+    mode: 'practice', config: {}, seed: 5, ai: 'casual', humanPlayer: 1,
+    series: 1, theme: 'slate', par: { marks: 5, timeMs: 90000 }, ranked: false, assists: {}, contentName: 'T',
+  });
+  fastForward(session);
+  session.commit({ player: 1, type: 'place', cell: 0 });
+  const bad = session.commit({ player: 2, type: 'place', cell: 0 }); // occupied
+  assert.equal(bad.ok, false);
+  session.commit({ player: 2, type: 'place', cell: 1 });
+  assert.equal(session.state.invalidActions[2], 1);
+  const rep = replayEnvelope(session.replay);
+  assert.ok(rep.ok, rep.reason);
+  assert.equal(rep.state.invalidActions[2], 1);
+  session.clearTimers();
 });
 
 test('series of 3 requires two round wins', () => {

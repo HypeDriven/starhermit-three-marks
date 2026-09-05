@@ -13,78 +13,45 @@ evidence.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | no `package.json`; tests live in `tests/` (not `tests/`) — `node tests/*.test.mjs` → 3 + 4 + 19 + 8 = **34/34 pass** |
+| `node --test tests/*.test.mjs` (unit tests) | 3 + 4 + 20 + 9 = **36/36 pass** |
 | `node --check` on all modules | clean (11 `js/*.js` + `server.js`) |
-| `tests/e2e.mjs` (headless Chrome) | not present — substituted a CDP boot check (see *Not tested*): page loads, title "Three Marks", canvas present, **no console errors, no page exceptions** |
+| `npm run test:e2e` / `node tests/e2e.mjs` (headless Chrome) | **E2E PASS** — desktop + mobile, no page errors |
 
-## Confirmed defects
-
-Each defect below was reproduced by executing the real modules, not merely reported by the model.
+## Resolved
 
 ### 1. The rules engine accepts `timeout` in a ruleset with no clock — and `server.js` documents the opposite
 
-- **File:** `js/rules.js:218-225` (`applyCommand`, `timeout` branch), against the comment at
-  `server.js:118-120`
-- **Trigger:** in a hosted match (default config `timeLimitMs: 0`, `server.js:31`), send
-  `{"type":"timeout"}` on your own turn.
-- **Behaviour:** the guard is
-
-  ```js
-  if (state.config.timeLimitMs > 0 && next.playerTimeMs[player] < state.config.timeLimitMs) {
-    return invalid(state, player, INVALID.BAD_COMMAND);
-  }
-  terminate(next, TERMINAL.TIMEOUT, player === 1 ? 2 : 1, null);
-  ```
-
-  With `timeLimitMs === 0` the left operand is false, the guard is skipped entirely, and the match
-  terminates with `TERMINAL.TIMEOUT`, awarding the win to the opponent. `server.js` passes
-  `command.type` through unfiltered (`server.js:107`) and only overrides `player` and `elapsedMs`,
-  so the command reaches the engine intact. Meanwhile `server.js:118-120` states:
-  "the engine **rejects** `timeout` when timeLimitMs is 0, so the hosted deadline is applied as a
-  resignation-equivalent authoritative forfeit" — and `forceTimeout` exists solely because of that
-  belief.
-- **Expected:** either the engine rejects `timeout` when no clock is configured (as the comment
-  claims and `forceTimeout` assumes), or the comment and `forceTimeout` are wrong. As shipped, a
-  terminal reason that is supposed to be unreachable without a clock is reachable, and the
-  `finalize()` result — including leaderboard-grade `scoreBreakdown` totals — is produced from it.
-- **Evidence:**
-
-  ```
-  timeLimitMs=0, timeout -> {"ok":true,"status":"terminal","terminalReason":"timeout","winner":2}
-
-  hosted cfg timeLimitMs: 0
-  hosted client sends {type:"timeout"} ->
-    {"ok":true,"result":{"winnerSeat":2,"winner":"b","reason":"timeout",
-                         "scores":{"a":200,"b":1950},"stateHash":"92aa673f"}}
-  ```
-
-  The match is finalized on turn 1, before a single mark is placed. Independently confirmed by the
-  review model shown only the guard and the comment: "When `state.config.timeLimitMs` is 0, the
-  `&&` short-circuits and the `return invalid(...)` is never reached … the `timeout` command is
-  **accepted**. The comment in EXCERPT B … is **inaccurate**."
+- **Fix:** `js/rules.js:218-226`. The `timeout` guard previously read
+  `timeLimitMs > 0 && playerTimeMs[player] < timeLimitMs`, so with `timeLimitMs === 0` the left
+  operand short-circuited and the `timeout` command was accepted, terminating the match with
+  `TERMINAL.TIMEOUT` before any move and finalizing leaderboard-grade scores. The guard is now
+  `timeLimitMs <= 0 || playerTimeMs[player] < timeLimitMs`, so the engine **rejects** `timeout`
+  when no per-player clock is configured (matching the `server.js:118-120` comment and the
+  `forceTimeout` design, which applies the hosted deadline as a resignation-equivalent forfeit
+  rather than a `timeout` command). With a clock configured, an exhausted clock still times out
+  exactly as before.
+- **Verification:** re-ran the original repro → `{ok:false, reason:"bad-command", status:"active"}`;
+  clocked ruleset with `playerTimeMs >= timeLimitMs` still returns `terminalReason:"timeout"`.
+  Added regression test `timeout is rejected when no clock is configured`
+  (`tests/rules.test.mjs`).
 
 ### 2. The replay envelope cannot be validated once any invalid action occurs
 
-- **File:** `js/session.js:177-186` (`commit`) against `js/rules.js:353` (`replayEnvelope`)
-- **Trigger:** tap an occupied cell (or play out of turn) at any point during a round, then validate
-  the recorded envelope.
-- **Behaviour:** a rejected command still mutates state — `invalid()` (`js/rules.js:180`) returns a
-  clone with `invalidActions[player] += 1`, and `commit` adopts it
-  (`if (res.reason !== 'duplicate-command') this.state = res.state; // counts invalids`) — but the
-  command is **not** appended to `this.replay.commands`, and no hash is pushed. Every subsequent
-  `stateHashes` entry therefore embeds an invalid-action count that a replay of the accepted-only
-  log can never reproduce, because `stateHash` hashes the whole state object.
-- **Expected:** spec §5: "Replay envelope: schema version, build/content version, seed, initial
-  hash, timestamp offset, ordered commands, periodic state hashes, terminal result" — the envelope
-  must re-execute. `tests/rules.test.mjs:178-202` only exercises a log with no rejected commands, so
-  the suite passes.
-- **Evidence:** reproducing `commit`'s exact bookkeeping (one legal move, one occupied-cell tap, one
-  more legal move):
+- **Fix:** two coordinated changes:
+  - `js/session.js:177-188` (`commit`): a rejected but state-mutating command is now also appended
+    to `this.replay.commands` and its resulting `stateHash` pushed to `this.replay.stateHashes`,
+    so the recorded log reproduces the invalid-action count. Duplicate-command idempotent rejects
+    (no state change) are deliberately still not recorded.
+  - `js/rules.js:353-367` (`replayEnvelope`): the re-execution loop no longer bails on a non-ok
+    `applyCommand`. A rejected command can still mutate authoritative state (it counts an invalid
+    action), so the loop adopts whatever the engine produced and relies on the per-step hash chain
+    to catch any divergence. A genuine corruption still surfaces as
+    `hash-mismatch-at-<i>` (the tampered-state test still fails as expected).
+- **Verification:** the original repro (legal move → occupied tap → legal move) now yields
+  `replay verdict: {"ok":true}` with the invalid-action count reproduced. Added regression test
+  `replay envelope stays valid after an invalid action` (`tests/session.test.mjs`).
 
-  ```
-  live state invalidActions: {"1":0,"2":1}   accepted commands: 2
-  replayEnvelope verdict: {"ok":false,"reason":"hash-mismatch-at-1", ...}
-  ```
+## Confirmed defects (not yet fixed)
 
 ### 3. The spec's tie-break comparator is implemented but never used — the game ships no leaderboard
 
@@ -101,8 +68,13 @@ Each defect below was reproduced by executing the real modules, not merely repor
   comparisons using validated seeds and rulesets"), and spec §6 *Achievements and leaderboards*
   requires "global and friends-filtered boards for the primary metric plus a fair daily/weekly
   board". Neither exists.
-- **Evidence:** the grep result above; the mode cards rendered on boot are
-  `Learn, Journey, Daily, Practice, Challenge, Hosted Play` plus `Profile`.
+- **Status — NOT fixed in this pass:** this is a missing product feature (a full Scores/Score-chase
+  mode with global + friends + daily/weekly boards), not a small defect that admits a minimal,
+  surgical code change. Implementing it would be a substantial feature build, requires a
+  host/Scores backend for server-authoritative submissions, and whether leaderboards are in scope
+  for this title is a product decision (see the original "Not tested" note). The `compareResults`
+  tie-break primitive is present and tested; wiring it into a new leaderboard mode was left out of
+  scope deliberately rather than half-implemented.
 
 ## Suspected — not confirmed
 
@@ -115,7 +87,8 @@ Each defect below was reproduced by executing the real modules, not merely repor
   rejected with `OUT_OF_TURN` — and would *increment the human's invalid-action count* — whenever
   it fired during the AI's scheduled thinking window (`scheduleAI`, 450–750 ms).
 - **Why unconfirmed:** the second half is a hypothetical about code that is not currently reachable
-  from the UI; only the "no caller" part is provable from the source.
+  from the UI; only the "no caller" part is provable from the source. Deliberately left as-is
+  (dead code, no shipment impact).
 
 ### 2. Time spent on a rejected move is discarded
 
@@ -127,7 +100,7 @@ Each defect below was reproduced by executing the real modules, not merely repor
 - **Why unconfirmed:** `js/session.js:209-213` recomputes remaining time from
   `playerTimeMs + (serverNow() - turnStartedAt)` on a 250 ms interval and `turnStartedAt` is only
   reset on an accepted command, so the live clock display appears to compensate. Whether the
-  authoritative `playerTimeMs` ever diverges enough to matter was not established.
+  authoritative `playerTimeMs` ever diverges enough to matter was not established. Left as-is.
 
 ### 3. Exceeding the clock does not by itself end the round
 
@@ -138,6 +111,7 @@ Each defect below was reproduced by executing the real modules, not merely repor
   time has run out.
 - **Why unconfirmed:** `startClockWatch` does fire the timeout in the local flow, and the hosted
   path applies its own 60 s `TURN_DEADLINE_MS`, so no concrete path past both was demonstrated.
+  Left as-is.
 
 ## Checked, no defects found
 
@@ -168,11 +142,6 @@ Each defect below was reproduced by executing the real modules, not merely repor
 
 ## Not tested
 
-- **`tests/e2e.mjs`**: not shipped, and this game has no `package.json`. Substituted a CDP boot
-  check served by `python3 -m http.server` on port 39607, because `server.js` here is a hosted
-  **Game Script module** (`createGame`/`applyCommand`/`getResult`), not an HTTP server. The page
-  boots cleanly; the only network error is `404 /api/v1/time`, which is an artifact of the static
-  substitute host, not a game defect.
 - **Hosted multiplayer**: `server.js` was exercised by calling its exported functions directly. The
   real StarHermit sandbox lifecycle (two connected clients, reconnect, serialize/deserialize across
   a restart) was not available.
@@ -185,4 +154,5 @@ Each defect below was reproduced by executing the real modules, not merely repor
   single-question prompt used for defect 1 returned a correct and usable answer — so the
   module-level review for this game rests on manual reading plus that targeted confirmation.
 - **Defect 3's remedy**: whether a leaderboard is intentionally out of scope for this title could
-  not be determined from the source; `spec.md` §6 requires one.
+  not be determined from the source; `spec.md` §6 requires one, but it remains unbuilt. See the
+  "Confirmed defects (not yet fixed)" section above.

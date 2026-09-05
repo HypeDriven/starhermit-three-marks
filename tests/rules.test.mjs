@@ -132,6 +132,24 @@ test('resign and timeout terminal reasons', () => {
   assert.equal(r.state.winner, 2);
 });
 
+test('timeout is rejected when no clock is configured', () => {
+  // A timeout is only meaningful with a per-player clock; without one the
+  // engine rejects it rather than awarding a phantom forfeit (hosted turn
+  // deadlines apply their own forfeit, not this command).
+  let s = createInitialState({}, 1);
+  const r = applyCommand(s, { player: 1, type: 'timeout' });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, INVALID.BAD_COMMAND);
+  assert.equal(r.state.status, 'active');
+  // With a clock, an exhausted clock still times out.
+  s = createInitialState({ timeLimitMs: 1000 }, 1);
+  s = applyCommand(s, { player: 1, type: 'place', cell: 0, elapsedMs: 1200 }).state;
+  const t = applyCommand(s, { player: 2, type: 'place', cell: 1, elapsedMs: 1500 }).state;
+  const ok = applyCommand(t, { player: 1, type: 'timeout' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.state.terminalReason, TERMINAL.TIMEOUT);
+});
+
 test('turn number increases monotonically', () => {
   let s = createInitialState({}, 1);
   let prev = s.turnNumber;

@@ -216,7 +216,10 @@ export function applyCommand(state, cmd) {
   }
 
   if (cmd.type === 'timeout') {
-    if (state.config.timeLimitMs > 0 && next.playerTimeMs[player] < state.config.timeLimitMs) {
+    // A timeout is only meaningful with a per-player clock configured; without
+    // one the engine rejects it (the hosted turn deadline applies the timeout
+    // itself via a resignation-equivalent forfeit, not this command).
+    if (state.config.timeLimitMs <= 0 || next.playerTimeMs[player] < state.config.timeLimitMs) {
       return invalid(state, player, INVALID.BAD_COMMAND);
     }
     terminate(next, TERMINAL.TIMEOUT, player === 1 ? 2 : 1, null);
@@ -357,7 +360,10 @@ export function replayEnvelope(envelope) {
   }
   for (let i = 0; i < envelope.commands.length; i++) {
     const res = applyCommand(state, envelope.commands[i]);
-    if (!res.ok) return { ok: false, reason: `command-${i}-${res.reason}`, state };
+    // Rejected commands may still mutate authoritative state (an invalid
+    // action counts against the actor), so adopt whatever the engine
+    // produced and rely on the hash chain to catch any divergence — this
+    // keeps a log that included a rejected command reproducible.
     state = res.state;
     if (envelope.stateHashes[i] != null && stateHash(state) !== envelope.stateHashes[i]) {
       return { ok: false, reason: `hash-mismatch-at-${i}`, state };

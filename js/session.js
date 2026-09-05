@@ -175,7 +175,17 @@ export class GameSession extends Emitter {
     };
     const res = applyCommand(this.state, cmd);
     if (!res.ok) {
-      if (res.reason !== 'duplicate-command') this.state = res.state; // counts invalids
+      // A rejected command still mutates authoritative state (it counts an
+      // invalid action against the actor), so the replay envelope must record
+      // it too — otherwise the invalid-action count can never be reproduced
+      // from the accepted-only command log and every later hash mismatches.
+      // Duplicate-command rejects are idempotent no-ops (no state change), so
+      // they are deliberately not recorded.
+      if (res.reason !== 'duplicate-command') {
+        this.state = res.state; // counts invalids
+        this.replay.commands.push(cmd);
+        this.replay.stateHashes.push(stateHash(this.state));
+      }
       this.emit('invalid', { reason: res.reason, cell, player });
       this.emit('state', this.state);
       return res;
