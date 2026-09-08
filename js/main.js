@@ -91,7 +91,7 @@ async function boot() {
     if (document.hidden) {
       // Backgrounding pauses solo simulation; rendering drops to zero.
       renderer.stop();
-      if (session.phase === PHASE.ACTIVE) session.pause('hidden');
+      if (session.isPausable()) session.pause('hidden');
       audio.suspend();
       platform.flushTelemetry();
     } else {

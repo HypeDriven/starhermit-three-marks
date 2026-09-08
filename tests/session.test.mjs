@@ -250,3 +250,90 @@ test('authoritative server script: turn deadline forfeits the stalled player', (
   assert.equal(result.winner, 'bob');
   assert.equal(result.reason, 'timeout');
 });
+
+test('pause and resume work from countdown and tutorial phases', () => {
+  // Countdown: the pending round-opening timer must be frozen, and resume
+  // must run the round opening (not skip it).
+  const { session } = makeSession();
+  session.startMatch({
+    mode: 'practice', config: {}, seed: 13, ai: 'casual', humanPlayer: 1,
+    series: 1, theme: 'slate', par: { marks: 5, timeMs: 90000 }, ranked: false, assists: {}, contentName: 'T',
+  });
+  assert.equal(session.phase, PHASE.COUNTDOWN);
+  assert.ok(session.isPausable());
+  assert.ok(session.pause('user'));
+  assert.equal(session.phase, PHASE.PAUSED);
+  assert.equal(session.resolveTimer, null, 'countdown timer cleared');
+  session.resume();
+  assert.equal(session.phase, PHASE.ACTIVE, 'resume ran the round opening');
+  assert.equal(session.state.status, 'active');
+  session.clearTimers();
+
+  // Tutorial: pause freezes the lesson (and its AI timer); resume returns to
+  // the tutorial phase instead of dropping into a plain active match.
+  const { session: s2 } = makeSession();
+  s2.startLesson(LESSONS[1]); // lesson with an AI rival
+  assert.equal(s2.phase, PHASE.TUTORIAL);
+  s2.lessonPlace(4); // triggers the scripted rival reply timer
+  assert.ok(s2.aiTimer, 'lesson AI reply scheduled');
+  assert.ok(s2.pause('user'));
+  assert.equal(s2.aiTimer, null, 'lesson AI timer frozen');
+  s2.resume();
+  assert.equal(s2.phase, PHASE.TUTORIAL, 'resume restores tutorial phase');
+  s2.clearTimers();
+});
+
+test('lesson matches are not snapshotted for resume', () => {
+  const { session } = makeSession();
+  session.startLesson(LESSONS[0]);
+  session.saveLocalSnapshot();
+  assert.equal(session.store.loadSnapshot('active-match'), null);
+  session.clearTimers();
+});
+
+test('daily: an unranked replay never overwrites the ranked record', () => {
+  const { session } = makeSession();
+  session.match = { config: {}, aiDifficulty: null }; // recordProgress context
+  const base = {
+    mode: 'daily', contentId: 'daily-2099-01-01', outcome: 'win',
+    rounds: [], breakdown: { components: [], total: 500 },
+    assistsUsed: false, ranked: true,
+  };
+  session.recordProgress(base);
+  let rec = session.store.loadProgression().dailies['daily-2099-01-01'];
+  assert.equal(rec.score, 500);
+  assert.equal(rec.excludedFromRanking, false);
+  // A higher-scoring unranked replay must not touch the ranked entry.
+  session.recordProgress({ ...base, ranked: false, breakdown: { components: [], total: 900 } });
+  rec = session.store.loadProgression().dailies['daily-2099-01-01'];
+  assert.equal(rec.score, 500, 'unranked replay did not overwrite');
+  // A first attempt with no prior record is still recorded, flagged excluded.
+  session.recordProgress({
+    ...base, contentId: 'daily-2099-01-02', ranked: false, assistsUsed: true,
+    breakdown: { components: [], total: 300 },
+  });
+  rec = session.store.loadProgression().dailies['daily-2099-01-02'];
+  assert.equal(rec.score, 300);
+  assert.equal(rec.excludedFromRanking, true);
+});
+
+
+test('snapshot restores remaining turn time, replay and original retry options', () => {
+  const { session, store } = makeSession();
+  let now = 10000;
+  session.platform.serverNow = () => now;
+  const options = { mode: 'practice', seed: 37, config: { timeLimitMs: 60000 }, assists: { timingAssist: true } };
+  session.startMatch(options);
+  fastForward(session);
+  now += 2400;
+  session.pause();
+  const restored = new GameSession({ platform: session.platform, store, audio: null });
+  now += 120000;
+  assert.equal(restored.loadLocalSnapshot(), true);
+  assert.deepEqual(restored.match.initialOptions, options);
+  assert.deepEqual(restored.replay, session.replay);
+  restored.resume();
+  assert.equal(now - restored.turnStartedAt, 2400);
+  assert.equal(restored.phase, PHASE.ACTIVE);
+  session.clearTimers(); restored.clearTimers();
+});

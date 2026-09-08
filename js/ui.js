@@ -585,6 +585,15 @@ export class UI {
 
   resumeSnapshot() {
     if (this.session.loadLocalSnapshot()) {
+      const m = this.session.match;
+      const config = { ...m.config };
+      if (m.assists?.timingAssistApplied && config.timeLimitMs > 0) config.timeLimitMs = Math.round(config.timeLimitMs / 1.5);
+      this.lastMatchOptions = m.initialOptions || {
+        mode: m.mode, contentId: m.contentId, contentName: m.contentName, config,
+        seed: m.seed, ai: m.aiDifficulty?.id, humanPlayer: m.humanPlayer,
+        series: m.seriesLength, theme: m.theme, ranked: m.ranked,
+        assists: m.assists, par: m.par, goals: m.goals,
+      };
       this.enterPlayfield();
       this.openPauseModal('Match restored where you left it.');
     }
@@ -670,6 +679,8 @@ export class UI {
 
   startDaily() {
     const daily = dailyFor(new Date(this.platform.serverNow()));
+    // One ranked attempt per day; replays of a completed daily are unranked.
+    const done = !!this.store.loadProgression().dailies[daily.id];
     this._setupSheet({
       title: daily.name,
       rows: [
@@ -677,13 +688,13 @@ export class UI {
         ['Rules', this._rulesSummary(daily.config)],
         ['Opponent', daily.ai],
         ['Seed', String(daily.seed)],
-        ['Ranked', this.settings.accessibility.timingAssist ? 'No (timing assist on)' : 'Yes — fair daily board'],
+        ['Ranked', this.settings.accessibility.timingAssist ? 'No (timing assist on)' : done ? 'No (already played today)' : 'Yes — fair daily board'],
       ],
       onStart: () => {
         this.lastMatchOptions = {
           mode: 'daily', contentId: daily.id, contentName: daily.name,
           config: daily.config, seed: daily.seed, ai: daily.ai, series: 1, theme: daily.theme,
-          par: { marks: 5, timeMs: 90000 }, ranked: true,
+          par: { marks: 5, timeMs: 90000 }, ranked: !done,
           assists: { timingAssist: this.settings.accessibility.timingAssist },
         };
         this._launch(this.lastMatchOptions);
@@ -734,6 +745,9 @@ export class UI {
     this.renderer.syncState(this.session.state, { instant: true });
     this._buildCellOverlay();
     this._updateHudChrome();
+    // The camera still moves after setup (intro swoop, angle changes), so the
+    // DOM mirror must track the projection every frame while the HUD is up.
+    this.renderer.onFrame = () => this._layoutCellOverlay();
     if (this.audio) {
       this.audio.setSeed(this.session.state.seed);
       this.audio.startAmbience(theme.ambience);
@@ -747,6 +761,7 @@ export class UI {
     this.session.abandonMatch();
     this.hud.hidden = true;
     this.pendingConfirmCell = null;
+    this.renderer.onFrame = null;
     // Restore the calm title attract board behind the menus.
     this.renderer.setTheme(themeById(this.settings.theme));
     this.renderer.buildBoard(
@@ -788,8 +803,9 @@ export class UI {
 
   _layoutCellOverlay() {
     if (!this.cellButtons || !this.session.state) return;
+    const rect = this.renderer.canvas?.getBoundingClientRect?.() || null;
     for (let i = 0; i < this.cellButtons.length; i++) {
-      const p = this.renderer.projectCell(i);
+      const p = this.renderer.projectCell(i, rect);
       const btn = this.cellButtons[i];
       const size = Math.max(44, p.halfSize * 1.7);
       btn.style.left = `${p.x}px`;
@@ -813,7 +829,10 @@ export class UI {
       const v = state.board[i];
       const disabledCell = state.config.disabledCells.includes(i);
       btn.setAttribute('aria-label', `Row ${r}, column ${c}: ${disabledCell ? 'sealed' : names[v]}${legal.has(i) ? ', available' : ''}`);
-      btn.disabled = !legal.has(i);
+      // aria-disabled (not the disabled attribute): buttons stay focusable and
+      // their taps route through tapCell, which explains why a move is illegal
+      // instead of silently swallowing the input.
+      btn.setAttribute('aria-disabled', legal.has(i) ? 'false' : 'true');
       btn.classList.toggle('occupied', v !== 0 || disabledCell);
     }
   }
@@ -952,7 +971,7 @@ export class UI {
       case 'cancel':
       case 'pause':
         e.preventDefault();
-        if (this.session.phase === PHASE.ACTIVE) this.pauseGame();
+        this.pauseGame();
         break;
       case 'undo':
         e.preventDefault();
@@ -1009,7 +1028,7 @@ export class UI {
         if (this.modal && this.modal.dataset.locked !== 'true') this.closeModal();
       }
       if (justPressed(9)) { // menu: pause
-        if (this.session.phase === PHASE.ACTIVE && !this.modal) this.pauseGame();
+        if (!this.modal) this.pauseGame();
       }
       for (let i = 0; i < gp.buttons.length; i++) prev[i] = pressed(i);
     };
@@ -1155,7 +1174,8 @@ export class UI {
   // ================= actions =================
 
   pauseGame() {
-    this.session.pause('user');
+    // No modal unless the session actually paused (e.g. not mid-resolution).
+    if (!this.session.pause('user')) return;
     this.openPauseModal();
   }
 
@@ -1240,14 +1260,22 @@ export class UI {
   openResults(result) {
     const s = this.session;
     const won = result.outcome === 'win';
-    const headline = won ? 'Victory' : result.outcome === 'draw' ? 'A Honest Draw' : 'Defeat';
+    const headline = won ? 'Victory' : result.outcome === 'draw' ? 'An Honest Draw' : 'Defeat';
     const rows = result.breakdown.components.map((c) =>
       el('tr', {}, el('td', {}, c.label), el('td', { class: 'num' }, `${c.value >= 0 ? '+' : ''}${c.value}`)));
 
     const actions = [];
     actions.push(el('button', {
       class: 'primary-btn',
-      onclick: () => { this.closeModal(); this.platform.track('retry', {}); this._launch(this.lastMatchOptions); },
+      onclick: () => {
+        this.closeModal();
+        this.platform.track('retry', {});
+        // A daily replay is always unranked — match the button's promise.
+        const opts = result.mode === 'daily' && this.lastMatchOptions
+          ? { ...this.lastMatchOptions, ranked: false }
+          : this.lastMatchOptions;
+        this._launch(opts);
+      },
     }, result.mode === 'daily' ? 'Play again (unranked)' : 'Retry'));
     if (result.mode === 'journey' && won) {
       const idx = JOURNEY_STAGES.findIndex((st) => st.id === result.contentId);

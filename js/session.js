@@ -91,6 +91,7 @@ export class GameSession extends Emitter {
     }
     this.match = {
       id: randomId(),
+      initialOptions: JSON.parse(JSON.stringify(options)),
       mode: options.mode || 'practice',
       contentId: options.contentId || null,
       contentName: options.contentName || 'Friendly Round',
@@ -381,12 +382,15 @@ export class GameSession extends Emitter {
     }
     if (result.mode === 'daily' && result.contentId) {
       const prev = prog.dailies[result.contentId];
-      if (!prev || result.breakdown.total > prev.score) {
+      // Only the first (ranked) attempt of the day updates the daily record;
+      // unranked replays never overwrite it. An assisted first attempt is
+      // recorded but flagged as excluded from ranking.
+      if ((result.ranked || !prev) && (!prev || result.breakdown.total > prev.score)) {
         prog.dailies[result.contentId] = {
           score: result.breakdown.total,
           won: result.outcome === 'win',
           completedAt: this.platform.serverNow(),
-          excludedFromRanking: result.assistsUsed,
+          excludedFromRanking: result.assistsUsed || !result.ranked,
         };
       }
       const todayIso = new Date(this.platform.serverNow()).toISOString().slice(0, 10);
@@ -439,34 +443,56 @@ export class GameSession extends Emitter {
 
   // ---- pause / resume (solo simulation freezes; UI never blocks rules) ----
 
+  isPausable() {
+    return [PHASE.ACTIVE, PHASE.TUTORIAL, PHASE.COUNTDOWN].includes(this.phase);
+  }
+
   pause(reason = 'user') {
-    if (this.phase !== PHASE.ACTIVE) return;
-    if (this.aiTimer) clearTimeout(this.aiTimer);
+    if (!this.isPausable()) return false;
+    if (this.aiTimer) { clearTimeout(this.aiTimer); this.aiTimer = null; }
+    // During countdown the round-opening timer is pending; freeze it too.
+    if (this.resolveTimer) { clearTimeout(this.resolveTimer); this.resolveTimer = null; }
     this.stopClockWatch();
+    this.pausedFrom = this.phase;
     this.pausedAt = this.platform.serverNow();
     this.setPhase(PHASE.PAUSED, 'session', reason);
     this.saveLocalSnapshot();
+    return true;
   }
 
   resume() {
     if (this.phase !== PHASE.PAUSED) return;
+    const from = this.pausedFrom || PHASE.ACTIVE;
+    this.pausedFrom = null;
+    if (from === PHASE.COUNTDOWN) {
+      // The countdown timer was cleared on pause; run the round opening now.
+      this.beginTurn();
+      return;
+    }
     // Shift the turn clock forward by the paused span.
     this.turnStartedAt += this.platform.serverNow() - this.pausedAt;
-    this.setPhase(PHASE.ACTIVE, 'session', 'resume');
+    this.setPhase(from, 'session', 'resume');
     this.startClockWatch();
-    if (this.ai && this.state.status === 'active' && this.state.currentPlayer !== this.match.humanPlayer) {
-      this.scheduleAI();
+    if (this.state?.status === 'active' && this.state.currentPlayer !== this.match?.humanPlayer) {
+      if (this.lesson) this.scheduleLessonAi();
+      else if (this.ai) this.scheduleAI();
     }
     this.emit('state', this.state);
   }
 
   saveLocalSnapshot() {
     if (!this.match || !this.state) return;
+    // Lessons are short and restartable, and their lesson context is not part
+    // of the snapshot — restoring one would leave the UI without it.
+    if (this.match.mode === 'learn') return;
     this.store.saveSnapshot('active-match', {
       savedAt: this.platform.serverNow(),
       match: { ...this.match, rounds: this.match.rounds.map((r) => ({ ...r, replay: undefined })) },
       stateJson: serialize(this.state),
       stackJson: this.stateStack.map(serialize),
+      replay: this.replay,
+      pausedFrom: this.pausedFrom || this.phase,
+      turnElapsed: Math.max(0, (this.phase === PHASE.PAUSED ? this.pausedAt : this.platform.serverNow()) - this.turnStartedAt),
     });
   }
 
@@ -474,11 +500,20 @@ export class GameSession extends Emitter {
     const snap = this.store.loadSnapshot('active-match');
     if (!snap || !snap.stateJson) return false;
     try {
+      if (snap.match?.mode === 'learn') {
+        // Lesson context is not snapshotted; never restore one.
+        this.store.clearSnapshot('active-match');
+        return false;
+      }
       this.match = snap.match;
       this.state = deserialize(snap.stateJson);
       this.stateStack = (snap.stackJson || [snap.stateJson]).map(deserialize);
       this.ai = this.match.aiDifficulty ? new PracticeAI(this.match.aiDifficulty.id, this.match.seed ^ 0x51ab) : null;
       this.replay = createReplayEnvelope({ seed: this.state.seed, config: this.state.config, buildVersion: BUILD_VERSION, contentVersion: CONTENT_VERSION });
+      if (snap.replay) this.replay = snap.replay;
+      this.pausedAt = this.platform.serverNow();
+      this.turnStartedAt = this.pausedAt - (Number.isFinite(snap.turnElapsed) ? Math.max(0, snap.turnElapsed) : 0);
+      this.pausedFrom = snap.pausedFrom === PHASE.COUNTDOWN ? PHASE.COUNTDOWN : PHASE.ACTIVE;
       this.setPhase(PHASE.PAUSED, 'session', 'snapshot-restored');
       this.emit('state', this.state);
       return true;
@@ -616,7 +651,7 @@ export class GameSession extends Emitter {
   }
 
   lessonAiMove() {
-    if (!this.lesson || this.state.status !== 'active') return;
+    if (this.phase !== PHASE.TUTORIAL || !this.lesson || this.state.status !== 'active') return;
     const step = this.lesson.def.steps[this.lesson.stepIndex];
     const human = this.match.humanPlayer;
     const cell = this.ai.chooseCell(this.state, this.state.currentPlayer);

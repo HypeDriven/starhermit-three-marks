@@ -221,6 +221,9 @@ export class BoardRenderer {
     if (tier.envDetail > 0) this._buildProps();
     this._buildGhostAndSelection();
     this._buildParticles();
+    // The fresh camera starts with aspect 1; re-apply the real canvas size so
+    // framing and cell projection are correct immediately after every rebuild.
+    this._applySize();
   }
 
   _buildBoardMeshes() {
@@ -478,12 +481,16 @@ export class BoardRenderer {
 
   // Build for a rules config; clears marks.
   buildBoard(config, visualSeed) {
+    // Dispose the previous scene's GPU resources first — otherwise every
+    // match start / theme switch leaks the old geometries and textures.
+    if (this.scene) this._disposeScene();
     this.config = config;
     this.visualSeed = visualSeed >>> 0;
     this.marks.clear();
     this.lastStateKey = '';
     this.hoverCell = null;
     this.selectedCell = null;
+    this._winLineCells = null;
     this._buildScene();
     this._introSwoop();
   }
@@ -765,11 +772,15 @@ export class BoardRenderer {
 
   // Screen-space rect of a cell in CSS pixels — the shared layout model that
   // lets the DOM overlay align exactly with projected 3D targets.
-  projectCell(index) {
+  projectCell(index, rect) {
+    // Matrices are only refreshed during render; make projections valid even
+    // when called between rebuilds/animations (the DOM overlay depends on it).
+    this.camera.updateMatrixWorld();
+    this.boardGroup.updateMatrixWorld();
     const { x, z } = this.cellCenter(index);
     const v = new THREE.Vector3(x, 0.03, z).applyMatrix4(this.boardGroup.matrixWorld);
     v.project(this.camera);
-    const rect = this.canvas.getBoundingClientRect();
+    rect = rect || this.canvas.getBoundingClientRect();
     const n = this.config.boardSize;
     const cellFrac = 1 / n;
     // Project a second point at cell edge to estimate on-screen cell size.
@@ -814,6 +825,12 @@ export class BoardRenderer {
     const pz = Math.sin(phi) * Math.cos(theta) * dist + this._parallax.y;
     this.camera.position.set(px, py, pz);
     this.camera.lookAt(0, lookY, 0);
+    // Fog must track the fitted distance: on tall/portrait aspects the camera
+    // backs off far enough that a fixed fog range would swallow the board.
+    if (this.scene?.fog) {
+      this.scene.fog.near = dist + 2.5;
+      this.scene.fog.far = dist + 10;
+    }
   }
 
   // Frame the board (plus frame and breathing room) for the current aspect,
@@ -929,6 +946,7 @@ export class BoardRenderer {
       this.clock.last = now;
       this._update(dt, now);
       this.renderer.render(this.scene, this.camera);
+      if (this.onFrame) this.onFrame();
     };
     this._frameId = requestAnimationFrame(loop);
   }

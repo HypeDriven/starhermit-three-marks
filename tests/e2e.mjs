@@ -115,27 +115,56 @@ const waitActive = (page) =>
     return !!s && s.phase === 'active' && !!s.state && s.state.status === 'active';
   }, null, { timeout: 15000 });
 
-// The game's interaction layer is the visible 3D canvas board: pointer events
-// raycast through the renderer (`renderer.onCellTap → tapCell`, ui.js _wireInput)
-// to the exact cell. The DOM overlay buttons are a *misaligned* accessibility
-// mirror (they project far below the viewport in this build), so every real
-// move here is a pointer click/tap on the visible board at the cell's projected
-// centre (`ui.renderer.projectCell(i)`), which routes through the same tapCell
-// handler as a human player.
+// The game's interaction layer is the visible board: pointer clicks land on
+// the DOM overlay cell buttons (which sit exactly on the projected 3D cells)
+// or on the canvas itself; both route through the same `tapCell` handler
+// (`renderer.onCellTap → tapCell`, overlay button onclick → tapCell, ui.js).
+// So every real move here is a click/tap at the cell's projected centre
+// (`ui.renderer.projectCell(i)`) — the same coordinates a player would hit.
 const cellCenter = (page, i) => page.evaluate((idx) => {
   const p = window.__threeMarks.ui.renderer.projectCell(idx);
   return { x: p.x, y: p.y };
 }, i);
 
-// Shipped defect: the DOM overlay accessibility mirrors mis-project far off /
-// over the real board, so their (pointer-events:auto) buttons intermittently
-// intercept clicks above the canvas. We neutralise their pointer-events so
-// every real click/tap lands on the visible 3D board and routes through the
-// renderer raycast (`onCellTap → tapCell`) — the same handler a player hits
-// when touching the visible slate. The buttons remain in the DOM (unmodified).
-const freeTheBoard = (page) => page.evaluate(() => {
-  for (const b of document.querySelectorAll('#cell-overlay .cell-btn')) b.style.pointerEvents = 'none';
-});
+// Regression check for a shipped defect: the DOM overlay accessibility mirror
+// previously mis-projected far off the real board, and its pointer-events:auto
+// buttons intercepted clicks meant for the canvas. Now every overlay button
+// must sit (within 12px) on the projected centre of its 3D cell, inside the
+// viewport — so a real click/tap at a cell centre hits the correct button or
+// the canvas directly beneath it, both routing to the same tapCell handler.
+const checkOverlayAlignment = async (page, name) => {
+  await page.waitForTimeout(1100); // let the camera intro settle
+  const rows = await page.evaluate(() => {
+    const ui = window.__threeMarks.ui;
+    return [...document.querySelectorAll('#cell-overlay .cell-btn')].map((b, i) => {
+      const r = b.getBoundingClientRect();
+      const p = ui.renderer.projectCell(i);
+      return {
+        i,
+        dx: r.left + r.width / 2 - p.x,
+        dy: r.top + r.height / 2 - p.y,
+        visible: r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
+      };
+    });
+  });
+  for (const m of rows) {
+    if (!m.visible) throw new Error(`overlay cell ${m.i} is off-viewport`);
+    if (Math.abs(m.dx) > 12 || Math.abs(m.dy) > 12) {
+      throw new Error(`overlay cell ${m.i} misaligned by ${m.dx.toFixed(1)},${m.dy.toFixed(1)}px`);
+    }
+  }
+  ok(`${name}: DOM overlay mirrors the 3D board (${rows.length} cells aligned)`);
+};
+
+// The board must actually be visible: a composited capture of the canvas
+// region that compresses to almost nothing means nothing rendered (e.g. the
+// camera's fitted distance pushed the board past the fixed fog far plane on
+// portrait aspects — everything faded into the background colour).
+const checkBoardVisible = async (page, name) => {
+  const shot = await page.locator('#gl-canvas').screenshot();
+  if (shot.length < 20000) throw new Error(`board canvas appears blank (${shot.length} bytes)`);
+  ok(`${name}: board renders visibly (${(shot.length / 1024).toFixed(0)} KB capture)`);
+};
 
 // ---- a sound 3×3 tic-tac-toe strategy (win if you can, block if you must,
 // ---- else center → corner → edge). Against the casual AI this always
@@ -213,7 +242,8 @@ async function startPracticeSetup(page, difficulty) {
   await page.click('#screen-practice button[type="submit"]');
   await page.waitForSelector('#hud', { state: 'visible' });
   await waitActive(page);
-  await freeTheBoard(page);
+  await checkOverlayAlignment(page, 'desktop');
+  await checkBoardVisible(page, 'desktop');
 }
 
 // ---------- one full pass ----------
@@ -308,10 +338,10 @@ async function runPass(browser, name, ctxOpts, { full }) {
       // results sheet with a headline + score breakdown
       await page.waitForSelector('#modal-root .sheet.results', { state: 'visible', timeout: 10000 });
       const headline = (await page.textContent('#modal-root .sheet.results h3')) || '';
-      if (!/Victory|A Honest Draw|Defeat/i.test(headline)) throw new Error(`unexpected results headline: "${headline}"`);
+      if (!/Victory|An Honest Draw|Defeat/i.test(headline)) throw new Error(`unexpected results headline: "${headline}"`);
       const scoreRows = await page.locator('#modal-root .sheet.results table tbody tr').count();
       if (scoreRows < 1) throw new Error('score breakdown table is empty');
-      if (done.winner === 0 && !/A Honest Draw/i.test(headline)) throw new Error('draw but headline mismatch');
+      if (done.winner === 0 && !/An Honest Draw/i.test(headline)) throw new Error('draw but headline mismatch');
       await page.screenshot({ path: SHOT('results', name) });
       ok(`${name}: round resolved — results shown ("${headline.trim()}", ${scoreRows} score rows, human ${done.humanMarks} vs AI ${done.aiMarks})`);
 
@@ -328,7 +358,8 @@ async function runPass(browser, name, ctxOpts, { full }) {
       await page.click('#btn-play');
       await page.waitForSelector('#hud', { state: 'visible' });
       await waitActive(page);
-      await freeTheBoard(page);
+      await checkOverlayAlignment(page, name);
+      await checkBoardVisible(page, name);
       let tapped = 0;
       for (let i = 0; i < 3; i++) {
         const st = await readState(page);

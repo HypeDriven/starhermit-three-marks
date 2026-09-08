@@ -92,7 +92,7 @@ body { -webkit-tap-highlight-color: transparent; }
   outline-offset: 2px;
   background: rgba(255, 217, 122, 0.08);
 }
-.cell-btn:disabled { cursor: default; }
+.cell-btn[aria-disabled="true"] { cursor: default; }
 
 .sr-only {
   position: absolute;

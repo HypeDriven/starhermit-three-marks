@@ -1,6 +1,77 @@
 # Known Issues — Three Marks
 
-QA pass 2026-08-20. Static review driven by Qwen3.8 27B on spark185 (OBLITERATED Q8_0, 262k ctx),
+## Review pass 2026-09-08 (Kimi)
+
+Follow-up review and fix pass. All findings below were reproduced against the
+real modules and verified with the unit tests plus the headless-Chrome e2e
+(which now asserts DOM-overlay alignment and a visibly rendered board instead
+of working around them).
+
+### Fixed in this pass
+
+1. **DOM accessibility overlay mis-projected and intercepted canvas clicks.**
+   The overlay cell buttons were positioned from a camera whose aspect was
+   stale (every scene build created a fresh camera with aspect 1 and the real
+   canvas size was only applied on window resize), and their layout was never
+   recomputed while the camera moved (intro swoop, angle changes). The e2e
+   carried a `freeTheBoard` workaround that disabled the buttons' pointer
+   events. Fixes: `render.js` `_buildScene` now re-applies the real canvas
+   size (`_applySize`), `projectCell` refreshes camera/board matrices before
+   projecting and accepts a precomputed rect, and `ui.js` re-lays the overlay
+   out every rendered frame via a new `renderer.onFrame` hook while the HUD is
+   up. The e2e now asserts every overlay button sits within 12 px of its
+   projected cell centre and drops the workaround.
+2. **Board invisible on portrait/mobile: fixed fog range swallowed it.**
+   `_fitDistance` pushes the camera to ~18 world units on tall aspects while
+   the scene fog was fixed at near 9 / far 16, so the entire board faded into
+   the background colour. Fog near/far now track the fitted camera distance
+   (`render.js` `_applyCamera`). The e2e asserts the canvas region captures
+   to a non-trivial size on both desktop and mobile.
+3. **`buildBoard` leaked the previous scene's GPU resources.** Every match
+   start / leave rebuilt the scene without disposing the old one.
+   `buildBoard` now disposes the existing scene first (and clears the stale
+   win-line descriptor).
+4. **Pause did not work during lessons or the round countdown.** The HUD
+   pause button opened the modal while the lesson AI or countdown timer kept
+   running behind it. `session.pause` now covers the `active`, `tutorial` and
+   `countdown` phases (freezing lesson-AI and countdown timers), `resume`
+   returns to the phase that was paused (restarting the round opening after a
+   countdown pause and re-scheduling a pending lesson rival reply), and the
+   pause modal only opens when the session actually paused.
+5. **Lesson matches could be snapshotted but never restored safely.**
+   `beforeunload` saved mid-lesson snapshots whose lesson context is not
+   serializable; restoring one crashed `_updateHudChrome` (null lesson info).
+   Lesson matches are no longer snapshotted, and a legacy `learn`-mode
+   snapshot is discarded instead of restored.
+6. **Daily replays were ranked and could overwrite the ranked record.** The
+   results button labelled "Play again (unranked)" relaunched the daily with
+   `ranked: true`, and a higher-scoring unranked replay overwrote the day's
+   ranked entry (flagging it excluded from ranking). Now: a completed daily
+   launches unranked (the setup sheet says so), result-screen retries of a
+   daily are unranked, and `recordProgress` never lets an unranked replay
+   overwrite the daily record.
+7. **Overlay cells used the `disabled` attribute**, which swallowed taps on
+   occupied/sealed cells with no explanation and made them unfocusable. They
+   now use `aria-disabled`, so taps route through `tapCell` and produce the
+   spoken/toasted reason, and keyboard users can focus every cell.
+8. **Small fixes:** results headline grammar ("An Honest Draw"); removed the
+   redundant inline data-URI favicon that shadowed `favicon.svg`.
+
+### Still open
+
+- The spec's leaderboard/score-chase mode remains unbuilt (`compareResults`
+  is tested but has no caller). A product-level feature; see the original
+  defect 3 below.
+- `session.resign()` still has no UI caller (dead code by design; "Leave
+  match" covers abandonment).
+- Text localization (en-US/en-GB/es-419/es-ES/de-DE/fr-FR/fr-CA/pt-BR/it-IT)
+  is not implemented; all UI strings are hardcoded English.
+- Rejected moves still discard their elapsed time in the authoritative clock
+  (the live clock display compensates; no demonstrated exploit path).
+
+## QA pass 2026-08-20 (original)
+
+Static review driven by Qwen3.8 27B on spark185 (OBLITERATED Q8_0, 262k ctx),
 alongside the game's own unit tests and a headless-Chrome boot check.
 
 Method note: broad "find the defects in this module" prompts to the review model mostly came back
