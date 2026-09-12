@@ -816,11 +816,26 @@ export class UI {
     for (let i = 0; i < this.cellButtons.length; i++) {
       const p = this.renderer.projectCell(i, rect);
       const btn = this.cellButtons[i];
-      const size = Math.max(44, p.halfSize * 1.7);
-      btn.style.left = `${p.x}px`;
-      btn.style.top = `${p.y}px`;
-      btn.style.width = `${size}px`;
-      btn.style.height = `${size}px`;
+      const q = p.quad;
+      if (q && q.every((c) => Number.isFinite(c.x) && Number.isFinite(c.y))) {
+        // bounding box of the projected cell, clipped to its exact polygon so
+        // neighbouring cells never steal each other's clicks
+        const xs = q.map((c) => c.x), ys = q.map((c) => c.y);
+        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+        const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+        btn.style.left = `${(x0 + x1) / 2}px`;
+        btn.style.top = `${(y0 + y1) / 2}px`;
+        btn.style.width = `${w}px`;
+        btn.style.height = `${h}px`;
+        btn.style.clipPath = 'polygon(' + q.map((c) => `${((c.x - x0) / w * 100).toFixed(2)}% ${((c.y - y0) / h * 100).toFixed(2)}%`).join(', ') + ')';
+      } else {
+        const size = Math.max(44, p.halfSize * 1.7);
+        btn.style.left = `${p.x}px`;
+        btn.style.top = `${p.y}px`;
+        btn.style.width = `${size}px`;
+        btn.style.height = `${size}px`;
+        btn.style.clipPath = '';
+      }
     }
   }
 

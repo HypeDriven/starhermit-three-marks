@@ -791,7 +791,25 @@ export class BoardRenderer {
     const ex = (e.x * 0.5 + 0.5) * rect.width + rect.left;
     const halfW = Math.abs(ex - sx);
     const halfH = halfW * (rect.width / rect.height) * (1 / 1); // approx square cells
-    return { x: sx, y: sy, halfSize: Math.max(halfW, halfH) };
+    return { x: sx, y: sy, halfSize: Math.max(halfW, halfH), quad: this.projectCellQuad(index, rect) };
+  }
+
+  // The four projected corners of a cell (CSS px, clockwise). Perspective
+  // foreshortens the far rows, so square hit areas around the centres overlap
+  // each other; the DOM overlay clips each button to this exact polygon.
+  projectCellQuad(index, rect) {
+    this.camera.updateMatrixWorld();
+    this.boardGroup.updateMatrixWorld();
+    rect = rect || this.canvas.getBoundingClientRect();
+    const n = this.config.boardSize;
+    const half = FRAMING.boardWorld / n / 2;
+    const { x, z } = this.cellCenter(index);
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    return corners.map(([dx, dz]) => {
+      const v = new THREE.Vector3(x + dx * half, 0.03, z + dz * half).applyMatrix4(this.boardGroup.matrixWorld);
+      v.project(this.camera);
+      return { x: (v.x * 0.5 + 0.5) * rect.width + rect.left, y: (-v.y * 0.5 + 0.5) * rect.height + rect.top };
+    });
   }
 
   setCameraAngle(angle) {
