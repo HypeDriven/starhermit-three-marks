@@ -29,8 +29,6 @@ export function defaultSettings() {
     tutorial: { completedLessons: [] },
     bindings: null, // player overrides for desktop key bindings
     theme: 'slate',
-    telemetryConsent: false,
-    name: 'Guest',
   };
 }
 

@@ -53,7 +53,7 @@ const MODE_META = {
   daily: { name: 'Daily', desc: 'One shared seed and ruleset per UTC day. Same slate for everyone.', duration: '~2 min', players: 'Solo vs AI', ranked: true },
   practice: { name: 'Practice', desc: 'Free play against the AI. Undo and hints allowed; never rated.', duration: 'You choose', players: 'Solo vs AI', ranked: false },
   challenge: { name: 'Challenge', desc: 'Constrained goals: clocks, move limits, sealed cells, misère.', duration: '1–5 min', players: 'Solo vs AI', ranked: false },
-  hosted: { name: 'Hosted Play', desc: 'Private invitations and public matching with reconnect and authoritative results.', duration: 'Varies', players: '2 players', ranked: true },
+  hosted: { name: 'Hosted Play', desc: 'Head-to-head hosted matches are not available in this build.', duration: '—', players: '2 players', ranked: false },
 };
 
 export class UI {
@@ -77,6 +77,8 @@ export class UI {
     this._wireSession();
     this._wireInput();
     this.applySettings(this.settings);
+    this.platform.onProfileLoaded = () => this._refreshIdentity();
+    this._refreshIdentity();
   }
 
   // ================= DOM skeleton =================
@@ -95,7 +97,9 @@ export class UI {
     this.turnBanner = el('div', { id: 'turn-banner' });
     this.clockEl = el('div', { id: 'clock-display' });
     this.btnPause = el('button', { id: 'btn-pause', class: 'icon-btn', 'aria-label': 'Pause', onclick: () => this.pauseGame() }, 'II');
-    const hudTop = el('div', { id: 'hud-top' }, this.objectiveEl, this.turnBanner, this.clockEl, this.btnPause);
+    this.hudNameEl = el('div', { id: 'player-name', 'aria-label': 'Player' });
+    this.syncEl = el('div', { id: 'sync-status', role: 'status' });
+    const hudTop = el('div', { id: 'hud-top' }, this.objectiveEl, this.turnBanner, this.clockEl, this.btnPause, this.hudNameEl, this.syncEl);
 
     this.railLeft = el('aside', { id: 'rail-left', 'aria-label': 'Match progress' });
     this.railRight = el('aside', { id: 'rail-right', 'aria-label': 'Actions' });
@@ -134,10 +138,12 @@ export class UI {
     const prog = this.store.loadProgression();
     this.titleDailyCard = el('button', { class: 'card', onclick: () => this.startDaily() });
     this.titleJourneyCard = el('button', { class: 'card', onclick: () => this.showScreen('journey') });
+    this.titleNameEl = el('p', { id: 'title-name', role: 'status' });
     this.screenTitle = el('section', { class: 'screen', id: 'screen-title', 'aria-labelledby': 'title-h' },
       el('div', { class: 'title-hero' },
         el('h1', { id: 'title-h' }, 'Three Marks'),
         el('p', { class: 'tagline' }, 'Alternate marks on the slate. Complete a row, column, or diagonal.'),
+        this.titleNameEl,
         el('button', {
           id: 'btn-play', class: 'primary-btn big', onclick: () => this.quickPlay(),
         }, 'Play'),
@@ -185,11 +191,9 @@ export class UI {
   }
 
   _buildModeScreen() {
-    const cards = Object.entries(MODE_META).map(([mode, meta]) => {
-      const locked = mode === 'hosted' && !this.platform.hosted;
-      return el('button', {
-        class: 'mode-card' + (locked ? ' locked' : ''),
-        'aria-disabled': locked ? 'true' : null,
+    const cards = Object.entries(MODE_META).map(([mode, meta]) =>
+      el('button', {
+        class: 'mode-card',
         onclick: () => this.openMode(mode),
       },
         el('h3', {}, meta.name),
@@ -199,9 +203,7 @@ export class UI {
           el('div', {}, el('dt', {}, 'Players'), el('dd', {}, meta.players)),
           el('div', {}, el('dt', {}, 'Ranked'), el('dd', {}, meta.ranked ? 'Yes' : 'No')),
         ),
-        locked ? el('p', { class: 'locked-note' }, 'Requires the StarHermit host connection.') : null,
-      );
-    });
+      ));
     this.screenModes = el('section', { class: 'screen', id: 'screen-modes', hidden: true, 'aria-labelledby': 'modes-h' },
       this._screenHeader('Choose a Mode', 'Every mode shows its rules before you commit.'),
       el('div', { class: 'mode-grid' }, cards),
@@ -419,7 +421,6 @@ export class UI {
       el('option', { value: 'standard' }, 'Standard'), el('option', { value: 'top' }, 'Top-down'), el('option', { value: 'low' }, 'Low angle'));
     this.setTheme = el('select', { onchange: (e) => this.updateSetting('theme', e.target.value) },
       THEMES.map((t) => el('option', { value: t.id }, t.name)));
-    this.setTelemetry = el('input', { type: 'checkbox', onchange: (e) => this.updateSetting('telemetryConsent', e.target.checked) });
     this.bindingsEditor = el('div', { class: 'bindings-editor' });
 
     this.screenSettings = el('section', { class: 'screen', id: 'screen-settings', hidden: true, 'aria-labelledby': 'set-h' },
@@ -439,7 +440,7 @@ export class UI {
           el('label', { class: 'slider-row' }, 'Color palette', this.setPalette)),
         el('fieldset', {}, el('legend', {}, 'Keyboard bindings'), this.bindingsEditor),
         el('fieldset', {}, el('legend', {}, 'Privacy'),
-          el('label', { class: 'toggle-row' }, this.setTelemetry, el('span', {}, 'Share anonymous usage statistics (aggregate only)')),
+          el('p', { class: 'help-note' }, 'This build sends no analytics or telemetry from the client.'),
           el('button', { class: 'ghost-btn', onclick: () => this.resetProgress() }, 'Reset all local progress')),
       ),
     );
@@ -448,24 +449,22 @@ export class UI {
 
   _buildProfileScreen() {
     this.profileStats = el('div', { class: 'profile-stats' });
-    this.nameInput = el('input', {
-      type: 'text', maxlength: 24, value: this.settings.name, 'aria-label': 'Display name',
-      onchange: (e) => { this.updateSetting('name', e.target.value.slice(0, 24) || 'Guest'); },
-    });
+    this.identityNameEl = el('strong', { class: 'profile-name' }, this.platform.displayName() || 'Player');
     this.screenProfile = el('section', { class: 'screen', id: 'screen-profile', hidden: true, 'aria-labelledby': 'prof-h' },
-      this._screenHeader('Profile', 'Local progress. Sign in arrives with the host connection.'),
+      this._screenHeader('Profile', 'Progress, identity and settings.'),
       el('div', { class: 'profile-grid' },
         el('div', { class: 'card' },
           el('h3', {}, 'Identity'),
-          el('label', { class: 'slider-row' }, 'Display name', this.nameInput),
-          el('p', { class: 'help-note' }, this.platform.hosted
-            ? 'Connected to StarHermit — progress syncs to your account.'
-            : 'Playing as a guest. Progress is stored on this device only.')),
+          this.platform.hosted
+            ? el('div', {},
+                this.identityNameEl,
+                el('p', { class: 'help-note' }, 'Signed in through StarHermit — progression syncs to this account.'))
+            : el('p', { class: 'help-note' }, 'Playing as a guest. Progress is stored on this device only.')),
         el('div', { class: 'card' }, el('h3', {}, 'Statistics'), this.profileStats),
         el('div', { class: 'card' },
           el('h3', {}, 'Friends & Social'),
           el('p', { class: 'help-note' }, this.platform.hosted
-            ? 'Friends panel, invitations and chat are available.'
+            ? 'Friends, invitations and chat live in the StarHermit host shell.'
             : 'Friends, invitations and chat require the StarHermit host. Offline, your social layer stays private.')),
         el('div', { class: 'card' },
           el('h3', {}, 'Shortcuts'),
@@ -494,18 +493,31 @@ export class UI {
     }
   }
 
+  // Account name (hosted) in the title and HUD slots; nothing to show offline.
+  _refreshIdentity() {
+    const name = this.platform.displayName();
+    if (this.titleNameEl) this.titleNameEl.textContent = name ? `Playing as ${name}` : '';
+    if (this.hudNameEl) {
+      this.hudNameEl.textContent = name || '';
+      this.hudNameEl.hidden = !name;
+    }
+    if (this.identityNameEl) this.identityNameEl.textContent = name || 'Player';
+  }
+
+  // Small cloud-sync indicator next to the clock: synced / saving / offline.
+  updateSyncStatus(state) {
+    if (!this.syncEl) return;
+    const label = state === 'synced' ? 'Synced' : state === 'saving' ? 'Saving…' : this.platform.hosted ? 'Offline' : 'Local';
+    this.syncEl.textContent = label;
+    this.syncEl.dataset.state = state;
+  }
+
   _buildHostedScreen() {
     this.screenHosted = el('section', { class: 'screen', id: 'screen-hosted', hidden: true, 'aria-labelledby': 'host-h' },
-      this._screenHeader('Hosted Play', 'Private invitations and public matching.'),
+      this._screenHeader('Hosted Play', 'Head-to-head matches with authoritative results.'),
       el('div', { class: 'card' },
-        this.platform.hosted
-          ? el('div', {},
-              el('p', {}, 'Connected. Create a private invitation or join public matching.'),
-              el('button', { class: 'primary-btn', onclick: () => this.toast('Invitations are managed in the host shell.') }, 'Create invitation'),
-              el('button', { class: 'ghost-btn', onclick: () => this.toast('Matchmaking is managed in the host shell.') }, 'Find match'))
-          : el('div', {},
-              el('p', {}, 'Hosted play needs the StarHermit host connection for invitations, matchmaking, reconnect and authoritative results.'),
-              el('p', { class: 'help-note' }, 'Everything else — Learn, Journey, Daily, Practice, Challenge — works fully offline.'))),
+        el('p', {}, 'Head-to-head hosted matches are not available in this build.'),
+        el('p', { class: 'help-note' }, 'Learn, Journey, Daily, Practice and Challenge are fully playable, and your progression syncs to your account when hosted.')),
     );
     this.screens.append(this.screenHosted);
   }
@@ -719,15 +731,12 @@ export class UI {
   }
 
   startLesson(lesson) {
-    this.platform.track('tutorial_step', { lesson: lesson.index, step: 0 });
     this.session.startLesson(lesson);
     this.enterPlayfield();
     this.announce(`Lesson: ${lesson.name}. ${lesson.intro}`);
   }
 
   _launch(options) {
-    this.platform.track('start', { mode: options.mode });
-    this.platform.startActivity();
     this.session.startMatch(options);
     this.hintAI = new PracticeAI('expert', (options.seed ^ 0x17) >>> 0);
     this.enterPlayfield();
@@ -1065,8 +1074,6 @@ export class UI {
       if (this.audio) this.audio.setMusicIntensity(0.4);
     });
     s.on('match-end', (result) => {
-      this.platform.track('round_end', { mode: result.mode === 'journey' ? 1 : 0, outcome: result.outcome === 'win' ? 1 : 0 });
-      this.platform.endActivity();
       this.session.discardLocalSnapshot();
       setTimeout(() => this.openResults(result), this.settings.accessibility.reducedMotion ? 100 : 700);
     });
@@ -1079,7 +1086,6 @@ export class UI {
       this.announce(info.step.text);
       this._updateCellLabels();
     });
-    s.on('lesson-advanced', () => this.platform.track('tutorial_step', { step: 1 }));
     s.on('lesson-failed-step', ({ text }) => {
       this.toast(text, 'warn');
       this.announceAssertive(text);
@@ -1269,7 +1275,6 @@ export class UI {
       class: 'primary-btn',
       onclick: () => {
         this.closeModal();
-        this.platform.track('retry', {});
         // A daily replay is always unranked — match the button's promise.
         const opts = result.mode === 'daily' && this.lastMatchOptions
           ? { ...this.lastMatchOptions, ranked: false }
@@ -1353,8 +1358,6 @@ export class UI {
     obj[keys[keys.length - 1]] = value;
     this.store.saveSettings(this.settings);
     this.applySettings(this.settings);
-    this.platform.track('settings_change', { key: keys[keys.length - 1] });
-    this.platform.setTelemetryConsent(this.settings.telemetryConsent);
   }
 
   applySettings(s) {
@@ -1384,7 +1387,6 @@ export class UI {
     this.setTheme.value = s.theme;
     this.setCamera.value = s.camera.angle;
     this.setPalette.value = a.palette;
-    this.setTelemetry.checked = s.telemetryConsent;
     this.togReduced.input.checked = a.reducedMotion;
     this.togContrast.input.checked = a.highContrast;
     this.togLargerText.input.checked = a.largerText;
@@ -1432,7 +1434,8 @@ export class UI {
 
   resetProgress() {
     if (!confirm('Reset all local progress, settings stay. This cannot be undone.')) return;
-    this.store.saveProgression({ ...this.store.loadProgression(), journey: {}, lessons: {}, challenges: {}, dailies: {}, achievements: {}, stats: { roundsPlayed: 0, roundsWon: 0, roundsDrawn: 0, byMode: {}, totalScore: 0 } });
+    const sealed = this.store.saveProgression({ ...this.store.loadProgression(), journey: {}, lessons: {}, challenges: {}, dailies: {}, achievements: {}, stats: { roundsPlayed: 0, roundsWon: 0, roundsDrawn: 0, byMode: {}, totalScore: 0 } });
+    this.session.emit('progress-saved', sealed);
     this.toast('Progress reset.');
     this._refreshTitleCards();
   }

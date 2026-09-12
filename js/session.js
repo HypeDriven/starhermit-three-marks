@@ -402,7 +402,9 @@ export class GameSession extends Emitter {
     }
     if (LESSONS.every((l) => prog.lessons[l.id])) tryUnlock('quick_study');
 
-    this.store.saveProgression(prog);
+    const sealed = this.store.saveProgression(prog);
+    // The platform adapter mirrors the sealed document to the cloud slot.
+    this.emit('progress-saved', sealed);
     if (unlocked.length && this.audio) this.audio.achievement();
     return unlocked;
   }

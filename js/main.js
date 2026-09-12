@@ -2,7 +2,7 @@
 // Owns the canvas and starts the render/UI shells; degrades to a clear
 // compatibility message (with the DOM board still usable) when WebGL fails.
 import { Platform } from './platform.js';
-import { Store } from './storage.js';
+import { Store, resolveConflict } from './storage.js';
 import { AudioEngine } from './audio.js';
 import { GameSession, PHASE } from './session.js';
 import { BoardRenderer } from './render.js';
@@ -16,21 +16,35 @@ async function boot() {
   const platform = new Platform();
   const store = new Store('player');
   const settings = store.loadSettings();
-  platform.setTelemetryConsent(settings.telemetryConsent);
 
   // Content integrity check at boot (offline validator).
   const contentProblems = validateContent();
   if (contentProblems.length) {
     console.error('Content validation failed:', contentProblems);
-    platform.track('error', { category: 'content' });
   }
 
-  // Host handshake with clock sync (falls back to local time offline).
+  // Host handshake (degrades to local play when no launch token is present).
   const host = await platform.boot();
   if (bootStatus) bootStatus.textContent = host.hosted ? 'Connected to host.' : 'Offline mode — full local play.';
 
+  // Cloud save: when hosted, load the remote mirror once. A strict-descendant
+  // local document wins outright; any other conflict prefers the remote copy.
+  // localStorage remains the offline cache either way.
+  if (host.hosted) {
+    const remote = await platform.loadCloudSave();
+    if (remote) {
+      const local = store.loadProgression();
+      const res = resolveConflict(local, remote);
+      if (res.winner !== local) store.saveProgression(remote);
+    }
+  }
+
   const audio = new AudioEngine(settings);
   const session = new GameSession({ platform, store, audio });
+
+  // Mirror every saved progression document to the cloud slot (debounced;
+  // the adapter no-ops when offline). The settings doc stays local-only.
+  session.on('progress-saved', (doc) => platform.queueCloudSave(doc));
 
   // Capability detection: WebGL.
   const canvas = document.createElement('canvas');
@@ -60,6 +74,8 @@ async function boot() {
 
   const ui = new UI({ root, session, renderer, audio, store, platform });
   ui.canvasWrap.prepend(canvas);
+  platform.onCloudSyncState = (state) => ui.updateSyncStatus(state);
+  ui.updateSyncStatus(platform.cloudSyncState);
 
   // First gesture unlocks audio.
   const unlock = () => {
@@ -93,7 +109,7 @@ async function boot() {
       renderer.stop();
       if (session.isPausable()) session.pause('hidden');
       audio.suspend();
-      platform.flushTelemetry();
+      platform.flushCloudSave();
     } else {
       audio.resume();
       renderer.start();
@@ -106,11 +122,12 @@ async function boot() {
 
   window.addEventListener('beforeunload', () => {
     session.saveLocalSnapshot();
-    platform.endActivity();
-    platform.flushTelemetry();
+    platform.flushCloudSave();
   });
-
-  platform.startPresence();
+  window.addEventListener('pagehide', () => {
+    session.saveLocalSnapshot();
+    platform.flushCloudSave();
+  });
 
   // Idle attract scene on the title screen: the authored slate itself is
   // the hero; no fake gameplay is simulated behind the menus.

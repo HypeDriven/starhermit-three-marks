@@ -344,8 +344,6 @@ body { -webkit-tap-highlight-color: transparent; }
 .mode-card:hover { border-color: var(--accent); }
 .mode-card h3 { margin: 0 0 0.4rem; }
 .mode-card p { margin: 0 0 0.8rem; color: var(--text-dim); font-size: 0.9rem; }
-.mode-card.locked { opacity: 0.55; cursor: default; }
-.locked-note { color: var(--accent) !important; }
 
 .mode-facts { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin: 0; }
 .mode-facts div { display: flex; gap: 0.4rem; }
@@ -485,10 +483,16 @@ body { -webkit-tap-highlight-color: transparent; }
 .profile-grid h3 { margin: 0; }
 .stat-row { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
 .stat-row:last-child { border-bottom: none; }
-.profile-grid input[type="text"] {
-  min-height: 44px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--panel-solid); color: var(--text); padding: 0 0.7rem; font-family: inherit;
+
+/* Account name slot (title, HUD, profile) and the cloud-sync indicator. */
+#title-name { margin: 0 0 0.8rem; color: var(--text-dim); font-size: 1rem; min-height: 1rem; }
+#player-name {
+  font-size: 0.85rem; font-weight: 600; color: var(--text); white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 0.35rem 0.9rem;
 }
+#sync-status { font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; }
+#sync-status[data-state="saving"] { color: var(--accent); }
+#sync-status[data-state="synced"] { color: var(--accent-2); }
 
 /* ---- Modal sheets ---- */
 
