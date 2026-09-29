@@ -643,3 +643,25 @@ body { -webkit-tap-highlight-color: transparent; }
 /* Focus visibility everywhere */
 :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 button { touch-action: manipulation; }
+
+/* Graphics settings */
+
+.settings-grid .gfx-section { grid-column: 1 / -1; }
+.gfx-cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.6rem 1rem; }
+.gfx-scale-label { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; white-space: nowrap; }
+.gfx-value { color: var(--text); font-variant-numeric: tabular-nums; }
+.gfx-summary { font-size: 0.8rem; overflow-wrap: anywhere; margin: 0.2rem 0 0; }
+.gfx-note { color: var(--accent); font-size: 0.82rem; margin: 0; }
+#fps-meter {
+  position: fixed;
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  z-index: 50;
+  pointer-events: none;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #e6e1d4;
+  font: 12px/1.4 ui-monospace, monospace;
+}
+#fps-meter[hidden] { display: none; }

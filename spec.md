@@ -121,6 +121,10 @@ The subject is the active playfield at near-tabletop to room scale, framed so st
 - Event hierarchy: input acknowledgment < legal move < combo/goal < round completion. Reserve camera motion, strong emission, and dense particles for the highest tier.
 - Audio uses original short transients tied to logical events, layered material impacts, quiet ambience, and adaptive music stems. Randomized pitch/variant is seeded for replay consistency where recording matters.
 
+### Graphics
+
+Lighting is a warm desk-lamp key light with PCF soft shadows (the shadow box is fitted tightly to the slate, plus the desk props when shown), a cool rim light from behind that catches chalk edges and the frame bevel, and a hemisphere fill, rendered with ACES filmic tone mapping and sRGB output. Optional effects: image-based lighting from a studio environment (PMREM `RoomEnvironment`) that gives the slate, lacquered wooden frame (clearcoat) and chalk a subtle sheen; procedural surface detail (wood-grain colour and roughness maps on the frame and a dark plank desk, a pore bump map on the slate, chalk-tooth bump on marks, plus the chalk-stick and eraser props); GTAO contact darkening; bloom limited to highlights (threshold 0.92), so glowing themes (Night Grid, Deep Current) and the winning line glow; a colour grade (gentle S-curve, warm highlights/cool shadows) with vignette; FXAA/SMAA/MSAA anti-aliasing; and soft round chalk-dust bursts plus drifting motes hanging in the lamp light (frozen under reduced motion or `prefers-reduced-motion`). The Settings screen's **Graphics** section offers a quality preset (Auto, chosen from the detected GPU where software renderers get Low, discrete GPUs and Apple M-series get High and anything else Balanced, with touch/mobile devices capped at Balanced; Low; Balanced; High; Ultra), a render scale (50–200% of the preset's), a per-effect override for shadows, ambient occlusion, bloom, colour grade, anti-aliasing, reflections, particles and surface detail ("From preset (…)" by default; choosing a preset clears overrides), adaptive resolution (averages 90 frames; steps down to 60% when frames exceed 26 ms and back up under 14 ms) and a frame-rate readout (bottom-left, never over controls), plus a summary line with the GPU name, cost summary and pixel size. The device pixel ratio is capped per preset (Low 1, Balanced 1.5, High/Ultra 2); Low renders directly without the post chain, so it is as cheap as the original renderer. Changes apply immediately without reloading, persist in the settings document (`graphics`: `preset`, `render_scale`, `adaptive`, `show_fps`, per-category overrides; the older `tier`/`renderScale` shape migrates), and are reflected as `data-gfx-preset` on the canvas and body. If the post-processing chain cannot be built, the game renders without it and the panel says so. Graphics panel strings are localized (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT) from the browser language.
+
 ### Camera and motion
 
 - Choose orthographic or low-distortion perspective according to depth requirements; expose framing constants rather than magic offsets.
@@ -158,7 +162,8 @@ Follow the skill pack's acceptance gate: deterministic seeds, debug views for co
 - `bootstrap`: host handshake, capability detection, asset manifest, lifecycle.
 - `rules`: pure deterministic state transitions, legality, scoring, seeded random stream.
 - `session`: local or hosted commands, snapshots, prediction policy, reconnect, replay.
-- `render`: Three.js scene graph, semantic entity views, camera, lighting, VFX, quality.
+- `render`: Three.js scene graph, semantic entity views, camera, lighting, VFX, quality (`js/render.js`; post-processing addons vendored from the same three.js r160 release under `vendor/addons/`, mapped by the import map in `index.html`).
+- `gfx`: pure graphics quality model — presets, categories, GPU detection, `resolve()`, `describe()` (`js/gfx.js`); Graphics panel strings in `js/gfx-i18n.js`.
 - `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror. Cell buttons in the mirror are clipped to each cell's projected polygon, so perspective foreshortening never lets neighbouring cells overlap.
 - `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
 - `content`: versioned levels, themes, tutorials, validation metadata.
@@ -190,7 +195,7 @@ No module may mutate rules state except through a validated command. Rendering c
 
 ### Identity, profile, presence, and preferences
 - Support guest practice locally; when hosted, identify the player by the account nickname from `GET /api/v1/users/{userId}/profile` (never `/api/v1/me`, never usernames) and cloud-save for durable progress. No presence or activity endpoints are reachable with launch tokens, so the client sends neither.
-- Store accessibility, audio, graphics tier, tutorial completion, camera preference, and rules options through per-game settings. Declare desktop action bindings and read player overrides; touch mappings remain responsive UI controls.
+- Store accessibility, audio, graphics preset and overrides, tutorial completion, camera preference, and rules options through per-game settings. Declare desktop action bindings and read player overrides; touch mappings remain responsive UI controls.
 - Cloud-save progression as a versioned, checksummed document in the single `/api/v1/me/cloud-saves/{slug}` slot (zip+base64), debounced ~2 s with a pagehide flush. On conflict prefer the remote copy unless the local document is a strict descendant (higher generation); localStorage stays the offline cache. Never place credentials or private chat in saves.
 
 ### Discovery, activity, and social layer

@@ -2,6 +2,7 @@
 // Local documents are versioned and checksummed like the cloud-save format so
 // a host sync layer can exchange them without transformation.
 import { hashString } from './rng.js';
+import { defaultGraphics, migrateGraphics } from './gfx.js';
 
 export const SAVE_VERSION = 1;
 const LS_PREFIX = 'three-marks.';
@@ -19,7 +20,7 @@ export function defaultSettings() {
   return {
     version: SAVE_VERSION,
     audio: { music: 0.6, effects: 0.8, ambience: 0.5, voice: 0.8, muted: false },
-    graphics: { tier: 'auto', renderScale: 1.0 }, // tier: auto|low|medium|high
+    graphics: defaultGraphics(), // see gfx.js: preset, render_scale, adaptive, show_fps, per-category overrides
     accessibility: {
       reducedMotion: false, highContrast: false, palette: 'default', // default|deuteranopia|tritanopia
       largerText: false, leftHanded: false, confirmMoves: false, timingAssist: false,
@@ -157,7 +158,7 @@ export function migrateSettings(doc) {
     ...doc,
     version: SAVE_VERSION,
     audio: { ...base.audio, ...(doc.audio || {}) },
-    graphics: { ...base.graphics, ...(doc.graphics || {}) },
+    graphics: migrateGraphics(doc.graphics),
     accessibility: { ...base.accessibility, ...(doc.accessibility || {}) },
     camera: { ...base.camera, ...(doc.camera || {}) },
     tutorial: { ...base.tutorial, ...(doc.tutorial || {}) },

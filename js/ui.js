@@ -9,6 +9,8 @@ import {
 } from './content.js';
 import { ACHIEVEMENTS } from './storage.js';
 import { PHASE } from './session.js';
+import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
+import { gfxStrings } from './gfx-i18n.js';
 
 export const DEFAULT_BINDINGS = {
   confirm: ['Enter', ' '],
@@ -393,13 +395,7 @@ export class UI {
     this.setVoice = slider('voice', 'Voice');
     this.setMuted = el('input', { type: 'checkbox', onchange: (e) => this.updateSetting('audio.muted', e.target.checked) });
 
-    this.setTier = el('select', { onchange: (e) => this.updateSetting('graphics.tier', e.target.value) },
-      el('option', { value: 'auto' }, 'Auto'), el('option', { value: 'low' }, 'Low'),
-      el('option', { value: 'medium' }, 'Medium'), el('option', { value: 'high' }, 'High'));
-    this.setScale = el('input', {
-      type: 'range', min: 0.5, max: 1, step: 0.05, value: s.graphics.renderScale,
-      oninput: (e) => this.updateSetting('graphics.renderScale', parseFloat(e.target.value)), 'aria-label': 'Render scale',
-    });
+    const gfxRows = this._buildGraphicsControls();
 
     const toggle = (key, label) => {
       const input = el('input', { type: 'checkbox', onchange: (e) => this.updateSetting(`accessibility.${key}`, e.target.checked) });
@@ -429,9 +425,8 @@ export class UI {
         el('fieldset', {}, el('legend', {}, 'Audio'),
           this.setMusic, this.setEffects, this.setAmbience, this.setVoice,
           el('label', { class: 'toggle-row' }, this.setMuted, el('span', {}, 'Mute all'))),
-        el('fieldset', {}, el('legend', {}, 'Graphics'),
-          el('label', { class: 'slider-row' }, 'Quality tier', this.setTier),
-          el('label', { class: 'slider-row' }, 'Render scale', this.setScale),
+        el('fieldset', { id: 'gfx-section', class: 'gfx-section' }, el('legend', {}, 'Graphics'),
+          gfxRows,
           el('label', { class: 'slider-row' }, 'Theme', this.setTheme),
           el('label', { class: 'slider-row' }, 'Camera', this.setCamera)),
         el('fieldset', {}, el('legend', {}, 'Accessibility'),
@@ -445,6 +440,82 @@ export class UI {
       ),
     );
     this.screens.append(this.screenSettings);
+  }
+
+  // Graphics section: quality preset, render scale, per-effect overrides,
+  // adaptive resolution, frame-rate readout and a live cost summary.
+  _buildGraphicsControls() {
+    const t = gfxStrings(navigator.language);
+    this._gt = t;
+    this.gfxPreset = el('select', { id: 'gfx-preset', 'data-gfx': 'preset', onchange: (e) => this.setGraphicsPreset(e.target.value) },
+      el('option', { value: 'auto' }, t('auto', { tier: '…' })),
+      PRESETS.map((p) => el('option', { value: p }, t(`presets.${p}`))));
+    this.gfxScaleValue = el('output', { id: 'gfx-scale-value', class: 'gfx-value' }, '100%');
+    this.gfxScale = el('input', {
+      id: 'gfx-scale', 'data-gfx': 'render_scale', type: 'range', min: 50, max: 200, step: 5, value: 100,
+      'aria-label': t('renderScale'),
+      oninput: (e) => this.updateGraphics({ render_scale: parseInt(e.target.value, 10) / 100 }),
+    });
+    this.gfxCats = {};
+    const catRows = Object.entries(CATEGORIES).map(([cat, tiers]) => {
+      const sel = el('select', { id: `gfx-${cat}`, 'data-gfx-cat': cat, onchange: (e) => this.updateGraphics({ [cat]: e.target.value }) },
+        el('option', { value: 'preset' }, t('fromPreset', { tier: '…' })),
+        tiers.map((tier) => el('option', { value: tier }, t(`tiers.${tier}`))));
+      this.gfxCats[cat] = sel;
+      return el('label', { class: 'slider-row' }, t(`cats.${cat}`), sel);
+    });
+    this.gfxAdaptive = el('input', { id: 'gfx-adaptive', type: 'checkbox', onchange: (e) => this.updateGraphics({ adaptive: e.target.checked }) });
+    this.gfxFps = el('input', { id: 'gfx-fps', type: 'checkbox', onchange: (e) => this.updateGraphics({ show_fps: e.target.checked }) });
+    this.gfxSummary = el('p', { id: 'gfx-summary', class: 'help-note gfx-summary', role: 'status' });
+    this.gfxPostNote = el('p', { id: 'gfx-post-note', class: 'help-note gfx-note', hidden: true }, t('postFailed'));
+    // Live summary (fps, adaptive pixels) while the settings screen is open.
+    setInterval(() => { if (this.screenSettings && !this.screenSettings.hidden) this._refreshGraphicsInfo(); }, 1000);
+    return [
+      el('label', { class: 'slider-row' }, t('quality'), this.gfxPreset),
+      el('label', { class: 'slider-row' }, el('span', { class: 'gfx-scale-label' }, t('renderScale'), this.gfxScaleValue), this.gfxScale),
+      el('div', { class: 'gfx-cats' }, catRows),
+      el('label', { class: 'toggle-row' }, this.gfxAdaptive, el('span', {}, t('adaptive'))),
+      el('label', { class: 'toggle-row' }, this.gfxFps, el('span', {}, t('showFps'))),
+      this.gfxSummary,
+      this.gfxPostNote,
+    ];
+  }
+
+  // Choosing a preset clears every per-category override.
+  setGraphicsPreset(preset) {
+    this.settings.graphics = choosePreset(this.settings.graphics, preset);
+    this.store.saveSettings(this.settings);
+    this.applySettings(this.settings);
+  }
+
+  updateGraphics(patch) {
+    const next = { ...this.settings.graphics, ...patch };
+    for (const [k, v] of Object.entries(patch)) if (v === 'preset') delete next[k];
+    this.settings.graphics = next;
+    this.store.saveSettings(this.settings);
+    this.applySettings(this.settings);
+  }
+
+  _refreshGraphicsInfo() {
+    const t = this._gt;
+    const g = this.settings.graphics;
+    const info = this.renderer?.graphicsInfo?.();
+    const detected = info?.detected || 'balanced';
+    const resolved = info?.resolved;
+    this.gfxPreset.options[0].textContent = t('auto', { tier: t(`presets.${detected}`) });
+    this.gfxPreset.value = PRESETS.includes(g.preset) ? g.preset : 'auto';
+    const pct = Math.round((g.render_scale ?? 1) * 100);
+    this.gfxScale.value = String(pct);
+    this.gfxScaleValue.textContent = `${pct}%`;
+    const preset = resolved?.preset || detected;
+    for (const [cat, sel] of Object.entries(this.gfxCats)) {
+      sel.options[0].textContent = t('fromPreset', { tier: t(`tiers.${presetTier(preset, cat)}`) });
+      sel.value = CATEGORIES[cat].includes(g[cat]) ? g[cat] : 'preset';
+    }
+    this.gfxAdaptive.checked = g.adaptive !== false;
+    this.gfxFps.checked = !!g.show_fps;
+    this.gfxSummary.textContent = info ? `${info.gpu} · ${info.summary}` : '';
+    this.gfxPostNote.hidden = !info?.postFailed;
   }
 
   _buildProfileScreen() {
@@ -1385,20 +1456,28 @@ export class UI {
     if (this.renderer) {
       this.renderer.setReducedMotion(a.reducedMotion);
       this.renderer.settings = s;
-      const tier = s.graphics.tier === 'auto' ? this._autoTier() : s.graphics.tier;
-      this.renderer.setQuality(tier, s.graphics.renderScale);
+      const gfxKey = JSON.stringify(s.graphics);
+      if (gfxKey !== this._gfxKey) {
+        this._gfxKey = gfxKey;
+        this.renderer.setGraphics?.(s.graphics);
+      }
       this.renderer.setCameraAngle(s.camera.angle);
-      if (!this.hud.hidden && this.session.state) {
-        // Refresh palette-dependent materials.
-        this.renderer._rebuildScenePreserving?.();
-        this.renderer.syncState(this.session.state, { instant: true });
-      } else {
-        this.renderer.setTheme(themeById(s.theme));
+      // Only theme/palette changes need the scene rebuilt (audio sliders etc. don't).
+      const sceneKey = `${s.theme}|${a.palette}`;
+      if (sceneKey !== this._sceneKey) {
+        this._sceneKey = sceneKey;
+        if (!this.hud.hidden && this.session.state) {
+          // Refresh palette-dependent materials.
+          this.renderer._rebuildScenePreserving?.();
+          this.renderer.syncState(this.session.state, { instant: true });
+        } else {
+          this.renderer.setTheme(themeById(s.theme));
+        }
       }
     }
     // Reflect values into controls.
     this.setMuted.checked = s.audio.muted;
-    this.setTier.value = s.graphics.tier;
+    this._refreshGraphicsInfo();
     this.setTheme.value = s.theme;
     this.setCamera.value = s.camera.angle;
     this.setPalette.value = a.palette;
@@ -1410,15 +1489,6 @@ export class UI {
     this.togTiming.input.checked = a.timingAssist;
     this.togHaptics.input.checked = a.haptics;
     this._renderBindingsEditor();
-  }
-
-  _autoTier() {
-    const cores = navigator.hardwareConcurrency || 4;
-    const mem = navigator.deviceMemory || 4;
-    const mobile = /Mobi|Android/i.test(navigator.userAgent);
-    if (mobile && (cores <= 4 || mem <= 3)) return 'low';
-    if (cores >= 8 && mem >= 8) return 'high';
-    return 'medium';
   }
 
   _renderBindingsEditor() {

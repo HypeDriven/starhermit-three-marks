@@ -246,6 +246,58 @@ async function startPracticeSetup(page, difficulty) {
   await checkBoardVisible(page, 'desktop');
 }
 
+// ---------- Graphics settings through the visible UI ----------
+// Title → Profile → Settings → Graphics: switch Low then High, override one
+// effect, confirm it is applied (data-gfx-preset + summary + saved settings)
+// and survives a reload; the panel must fit the viewport width.
+async function testGraphics(page, name) {
+  const gfxSaved = () => page.evaluate(() => JSON.parse(localStorage.getItem('three-marks.player.settings') || '{}').graphics || {});
+  const openSettings = async () => {
+    await page.click('button.card:has-text("Profile")');
+    await page.waitForSelector('#screen-profile', { state: 'visible' });
+    await page.click('#screen-profile .ghost-btn:has-text("Settings")');
+    await page.waitForSelector('#screen-settings', { state: 'visible' });
+    await page.locator('#gfx-preset').scrollIntoViewIfNeeded();
+  };
+  await openSettings();
+  await page.selectOption('#gfx-preset', 'low');
+  await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+  await page.selectOption('#gfx-preset', 'high');
+  await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high' && document.querySelector('#gl-canvas')?.dataset.gfxPreset === 'high');
+  await page.selectOption('#gfx-bloom', 'off');
+  await page.waitForTimeout(400); // a few frames through the rebuilt post chain
+  let g = await gfxSaved();
+  if (g.preset !== 'high' || g.bloom !== 'off') throw new Error('graphics not saved: ' + JSON.stringify(g));
+  await page.waitForFunction(() => /2048² shadows/.test(document.querySelector('#gfx-summary')?.textContent || '') && !/bloom/.test(document.querySelector('#gfx-summary').textContent));
+  const fits = await page.evaluate(() => {
+    const r = document.querySelector('#gfx-section').getBoundingClientRect();
+    return r.left >= 0 && r.right <= innerWidth + 0.5 && document.documentElement.scrollWidth <= innerWidth + 1;
+  });
+  if (!fits) throw new Error('Graphics panel overflows the viewport width');
+  await page.screenshot({ path: SHOT('graphics', name) });
+  // Choosing a preset clears overrides.
+  await page.selectOption('#gfx-preset', 'ultra');
+  g = await gfxSaved();
+  if (g.bloom !== undefined || g.preset !== 'ultra') throw new Error('preset did not clear overrides: ' + JSON.stringify(g));
+  await page.waitForTimeout(400);
+  await page.selectOption('#gfx-preset', 'high');
+  await page.selectOption('#gfx-bloom', 'off');
+  // Survives reload.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__threeMarks?.session?.phase === 'title');
+  await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high');
+  await openSettings();
+  const vals = await page.evaluate(() => [document.querySelector('#gfx-preset').value, document.querySelector('#gfx-bloom').value]);
+  if (vals[0] !== 'high' || vals[1] !== 'off') throw new Error('graphics settings lost on reload: ' + vals);
+  // Back to Auto (software GPU → Low) for the rest of the run.
+  await page.selectOption('#gfx-preset', 'auto');
+  await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#screen-title', { state: 'visible', timeout: 15000 });
+  await page.waitForFunction(() => window.__threeMarks?.session?.phase === 'title');
+  ok(`${name}: Graphics panel — Low → High, bloom override, Ultra clears overrides, persists across reload`);
+}
+
 // ---------- one full pass ----------
 async function runPass(browser, name, ctxOpts, { full }) {
   const errors = [];
@@ -253,7 +305,7 @@ async function runPass(browser, name, ctxOpts, { full }) {
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() !== 'error' || browserNoise.test(m.text())) return;
+    if ((m.type() !== 'error' && m.type() !== 'warning') || browserNoise.test(m.text())) return;
     const url = m.location()?.url || '';
     if (/Failed to load resource/.test(m.text()) && /\/api\/|\/favicon/.test(url)) return;
     errors.push(`console: ${m.text()}`);
@@ -272,6 +324,7 @@ async function runPass(browser, name, ctxOpts, { full }) {
     if (!/Three Marks/i.test(title)) throw new Error(`unexpected title: "${title}"`);
     await page.screenshot({ path: SHOT('title', name) });
     ok(`${name}: title screen visible ("${title.trim()}")`);
+    await testGraphics(page, name);
 
     if (full) {
       // Practice setup → a real 3×3 Casual single round where the human opens.
