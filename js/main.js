@@ -6,7 +6,8 @@ import { Store, resolveConflict } from './storage.js';
 import { AudioEngine } from './audio.js';
 import { GameSession, PHASE } from './session.js';
 import { BoardRenderer } from './render.js';
-import { UI } from './ui.js';
+import { UI, DEFAULT_BINDINGS } from './ui.js';
+import { shText } from './sh-i18n.js';
 import { themeById, validateContent } from './content.js';
 
 async function boot() {
@@ -37,6 +38,12 @@ async function boot() {
       const res = resolveConflict(local, remote);
       if (res.winner !== local) store.saveProgression(remote);
     }
+    // Platform-stored preferences and key bindings win over local ones.
+    const prefs = await platform.loadPlatformSettings(settings);
+    if (prefs) Object.assign(settings, prefs);
+    const bindings = await platform.loadBindings(DEFAULT_BINDINGS);
+    if (bindings) settings.bindings = bindings;
+    store.saveSettings(settings);
   }
 
   const audio = new AudioEngine(settings);
@@ -75,6 +82,10 @@ async function boot() {
   const ui = new UI({ root, session, renderer, audio, store, platform });
   ui.canvasWrap.prepend(canvas);
   platform.onCloudSyncState = (state) => ui.updateSyncStatus(state);
+  platform.onAuthChange = (a) => {
+    if (!a.signedIn) ui.toast(shText('signedOut'));
+    ui._refreshIdentity();
+  };
   ui.updateSyncStatus(platform.cloudSyncState);
 
   // First gesture unlocks audio.

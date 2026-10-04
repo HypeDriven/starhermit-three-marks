@@ -665,3 +665,4 @@ button { touch-action: manipulation; }
   font: 12px/1.4 ui-monospace, monospace;
 }
 #fps-meter[hidden] { display: none; }
+.ghost-btn[hidden] { display: none; }

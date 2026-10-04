@@ -11,16 +11,33 @@ import { ACHIEVEMENTS } from './storage.js';
 import { PHASE } from './session.js';
 import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
 import { gfxStrings } from './gfx-i18n.js';
+import { shText } from './sh-i18n.js';
 
+// KeyboardEvent.code values — mirrors the control.* lines in starhermit.txt.
 export const DEFAULT_BINDINGS = {
-  confirm: ['Enter', ' '],
+  confirm: ['Enter', 'Space'],
   cancel: ['Escape'],
-  pause: ['p', 'P'],
-  undo: ['u', 'U'],
-  hint: ['h', 'H'],
-  cameraReset: ['c', 'C'],
+  pause: ['KeyP'],
+  undo: ['KeyU'],
+  hint: ['KeyH'],
+  cameraReset: ['KeyC'],
   up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
 };
+
+/** Older builds stored KeyboardEvent.key values ('u', ' '); map to codes. */
+export function keyToCode(k) {
+  k = String(k);
+  if (/^[a-z]$/i.test(k)) return 'Key' + k.toUpperCase();
+  if (/^[0-9]$/.test(k)) return 'Digit' + k;
+  if (k === ' ') return 'Space';
+  return k;
+}
+/** Short on-screen label for a KeyboardEvent.code. */
+export function codeLabel(c) {
+  if (/^Key[A-Z]$/.test(c)) return c.slice(3);
+  if (/^Digit\d$/.test(c)) return c.slice(5);
+  return c;
+}
 
 const BINDING_LABELS = {
   confirm: 'Place mark / confirm', cancel: 'Cancel / back', pause: 'Pause',
@@ -152,6 +169,10 @@ export class UI {
         this.session.hasLocalSnapshot()
           ? el('button', { class: 'ghost-btn resume-btn', onclick: () => this.resumeSnapshot() }, 'Resume interrupted match')
           : null,
+        el('div', { class: 'title-account' },
+          this.signInBtn = el('button', { id: 'btn-signin', class: 'ghost-btn', hidden: !this.platform.canSignIn(), onclick: () => this.platform.signIn() }, shText('signIn')),
+          ' ',
+          this.inviteBtn = el('button', { id: 'btn-invite', class: 'ghost-btn', hidden: !this.platform.inviteLink(), onclick: () => this.copyInvite() }, shText('invite'))),
       ),
       el('div', { class: 'title-cards' },
         this.titleDailyCard,
@@ -376,7 +397,7 @@ export class UI {
     for (const [action, keys] of Object.entries(bindings)) {
       this.helpBindings.append(el('div', { class: 'binding-row' },
         el('span', {}, BINDING_LABELS[action] || action),
-        el('kbd', {}, keys.map((k) => (k === ' ' ? 'Space' : k)).join(' / ')),
+        el('kbd', {}, keys.map(codeLabel).join(' / ')),
       ));
     }
   }
@@ -485,6 +506,7 @@ export class UI {
   setGraphicsPreset(preset) {
     this.settings.graphics = choosePreset(this.settings.graphics, preset);
     this.store.saveSettings(this.settings);
+    this.platform.pushSettings(this.settings);
     this.applySettings(this.settings);
   }
 
@@ -493,6 +515,7 @@ export class UI {
     for (const [k, v] of Object.entries(patch)) if (v === 'preset') delete next[k];
     this.settings.graphics = next;
     this.store.saveSettings(this.settings);
+    this.platform.pushSettings(this.settings);
     this.applySettings(this.settings);
   }
 
@@ -564,8 +587,17 @@ export class UI {
     }
   }
 
+  async copyInvite() {
+    const url = this.platform.inviteLink();
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); this.toast(shText('copied')); }
+    catch { this.toast(shText('copyFail', { url })); }
+  }
+
   // Account name (hosted) in the title and HUD slots; nothing to show offline.
   _refreshIdentity() {
+    if (this.signInBtn) this.signInBtn.hidden = !this.platform.canSignIn();
+    if (this.inviteBtn) this.inviteBtn.hidden = !this.platform.inviteLink();
     const name = this.platform.displayName();
     if (this.titleNameEl) this.titleNameEl.textContent = name ? `Playing as ${name}` : '';
     if (this.hudNameEl) {
@@ -1013,14 +1045,15 @@ export class UI {
   effectiveBindings() {
     const merged = {};
     for (const [action, keys] of Object.entries(DEFAULT_BINDINGS)) {
-      merged[action] = this.settings.bindings?.[action] || keys;
+      const own = this.settings.bindings?.[action];
+      merged[action] = own ? [...new Set(own.map(keyToCode))] : keys;
     }
     return merged;
   }
 
-  _actionForKey(key) {
+  _actionForKey(code) {
     for (const [action, keys] of Object.entries(this.effectiveBindings())) {
-      if (keys.includes(key)) return action;
+      if (keys.includes(code)) return action;
     }
     return null;
   }
@@ -1030,7 +1063,7 @@ export class UI {
     if (e.target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
       if (e.key !== 'Escape') return;
     }
-    const action = this._actionForKey(e.key);
+    const action = this._actionForKey(e.code);
     if (!action) return;
 
     if (this.modal) {
@@ -1443,6 +1476,7 @@ export class UI {
     for (let i = 0; i < keys.length - 1; i++) obj = obj[keys[i]];
     obj[keys[keys.length - 1]] = value;
     this.store.saveSettings(this.settings);
+    this.platform.pushSettings(this.settings);
     this.applySettings(this.settings);
   }
 
@@ -1498,9 +1532,19 @@ export class UI {
       const btn = el('button', {
         class: 'ghost-btn small',
         onclick: () => this._captureBinding(action),
-      }, keys.map((k) => (k === ' ' ? 'Space' : k)).join(' / '));
+      }, keys.map(codeLabel).join(' / '));
       this.bindingsEditor.append(el('div', { class: 'binding-row' }, el('span', {}, BINDING_LABELS[action] || action), btn));
     }
+    this.bindingsEditor.append(el('button', {
+      class: 'ghost-btn small', id: 'btn-reset-keys', onclick: () => this.resetBindings(),
+    }, shText('resetKeys')));
+  }
+
+  resetBindings() {
+    this.updateSetting('bindings', null);
+    this.platform.resetBindings();
+    this._renderBindingsEditor();
+    this._refreshHelpBindings();
   }
 
   _captureBinding(action) {
@@ -1508,10 +1552,16 @@ export class UI {
     const handler = (e) => {
       e.preventDefault();
       window.removeEventListener('keydown', handler, true);
-      if (e.key === 'Escape') return;
-      const bindings = { ...(this.settings.bindings || {}) };
-      bindings[action] = [e.key];
+      if (e.code === 'Escape' || !e.code) return;
+      // One action per key: the code moves off any other action.
+      const bindings = this.effectiveBindings();
+      const changed = { [action]: [e.code] };
+      for (const [other, codes] of Object.entries(bindings)) {
+        if (other !== action && codes.includes(e.code)) changed[other] = codes.filter((c) => c !== e.code);
+      }
+      Object.assign(bindings, changed);
       this.updateSetting('bindings', bindings);
+      for (const [a, codes] of Object.entries(changed)) this.platform.saveBinding(a, codes);
       this._renderBindingsEditor();
     };
     window.addEventListener('keydown', handler, true);
