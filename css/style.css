@@ -69,7 +69,7 @@ body { -webkit-tap-highlight-color: transparent; }
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   padding: 0.5rem 1rem;
-  max-width: min(90vw, 46ch);
+  max-width: min(calc(90vw / var(--ui-scale, 1)), 46ch);
   font-size: 0.85rem;
 }
 
@@ -244,9 +244,9 @@ body { -webkit-tap-highlight-color: transparent; }
 
 /* Title */
 
-#screen-title { justify-content: center; text-align: center; }
+#screen-title { justify-content: center; justify-content: safe center; text-align: center; }
 .title-hero h1 {
-  font-size: clamp(2.6rem, 8vw, 4.6rem);
+  font-size: clamp(2.6rem, calc(8vw / var(--ui-scale, 1)), 4.6rem);
   margin: 0;
   letter-spacing: 0.02em;
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.6);
@@ -562,13 +562,13 @@ body { -webkit-tap-highlight-color: transparent; }
 .toast {
   background: var(--panel-solid);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 1.2em;
   padding: 0.5rem 1.2rem;
   font-size: 0.9rem;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.25s, transform 0.25s;
-  max-width: min(88vw, 60ch);
+  max-width: min(calc(88vw / var(--ui-scale, 1)), 60ch);
   text-align: center;
 }
 .toast.show { opacity: 1; transform: translateY(0); }
@@ -666,3 +666,8 @@ button { touch-action: manipulation; }
 }
 #fps-meter[hidden] { display: none; }
 .ghost-btn[hidden] { display: none; }
+
+/* Large screens: ui-scale.js sets --ui-scale (1 up to 1600x1000). Every DOM
+   UI layer is zoomed once; the full-viewport 3D canvas and the cell overlay
+   (positioned from projected canvas coordinates) stay unzoomed. */
+#hud, #screens, #modal-root, #toasts, .compat-note, #fps-meter, #boot-status { zoom: var(--ui-scale, 1); }

@@ -657,6 +657,7 @@ export class UI {
     const target = map[name];
     if (target) {
       target.hidden = false;
+      target.scrollTop = 0;
       const focusable = target.querySelector('button, select, input');
       if (focusable) focusable.focus({ preventScroll: true });
     }
