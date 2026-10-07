@@ -748,7 +748,7 @@ export class UI {
         ['Opponent', `${stage.opponent.name} (${stage.opponent.difficulty})`],
         ['Series', stage.series > 1 ? `Best of ${stage.series}` : 'Single round'],
         ['Duration', stage.par.timeMs >= 240000 ? '~5 min' : '~2 min'],
-        ['Ranked', 'No (progression)'],
+        ['Ranked', this.platform.hosted ? 'Platform leaderboard (unassisted)' : 'No (progression)'],
         ['Par', `${stage.par.marks} marks · ${fmtTime(stage.par.timeMs)}`],
         ['Best', rec ? `${rec.stars}★ · ${rec.bestScore} pts` : '—'],
       ],
@@ -764,7 +764,7 @@ export class UI {
         ['Rules', this._rulesSummary(c.config)],
         ['Opponent', c.ai],
         ['Seed', String(c.seed)],
-        ['Ranked', 'No'],
+        ['Ranked', this.platform.hosted ? 'Platform leaderboard (unassisted)' : 'No'],
       ],
       onStart: () => this.startChallenge(c),
     });
