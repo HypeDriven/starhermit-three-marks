@@ -209,14 +209,14 @@ No module may mutate rules state except through a validated command. Rendering c
 
 ### Achievements and leaderboards
 - Declare a small static achievement set: first completion, mechanic mastery, a sustained streak, a difficult content milestone, and an accessibility-neutral long-term goal. Keys are stable, lowercase identifiers; unlocks are idempotent.
-- Keep personal-best records locally and in the cloud slot. Global and friends boards are host-owned: the client never submits scores to a leaderboard (script/elo-owned), so the daily "ranked" flag only marks the first fair attempt in the local record.
+- Keep personal-best records locally and in the cloud slot. Signed in, every unassisted Journey, Daily or Challenge match posts its total through `StarHermit.submitScores` (`Platform.submitScore`): a practice session whose platform script `score-script.js` (canonical copy in the games repo's `tools/score-script.js`) range-checks it and posts it to the `high-score` board (integer, higher is better, 0–100,000). The results sheet's `#results-lb` line shows "Leaderboard rank: #N" (or posted / not posted; localized in `js/sh-i18n.js`). Practice, lessons and assisted matches post nothing; standalone posts nothing and shows no line. The daily "ranked" flag still marks the first fair attempt in the local record.
 - Competitive outcomes, rating changes, and achievement unlocks are server-authoritative. Never accept a client-supplied winner, score, hidden state, or elapsed time as truth.
 
 ### Sessions and transport
-- All play runs locally against the deterministic AI or hot-seat. `server.js` exports a module-style rules contract (`createGame`/`applyCommand`/…) rather than the platform's Jint `globalThis.game` handlers, so it declares no achievements, boards, queues or replays to the platform and the client opens no gameplay sessions; the Hosted Play screen says head-to-head hosted matches are not available in this build.
+- All play runs locally against the deterministic AI or hot-seat. `server.js` exports a module-style rules contract (`createGame`/`applyCommand`/…) rather than the platform's Jint `globalThis.game` handlers, so it declares no achievements, queues or replays to the platform; the only platform session the client opens is the score post's practice session (handled by `score-script.js`); the Hosted Play screen says head-to-head hosted matches are not available in this build.
 
 ### Publishing and operations
-- Keep the authoritative script inside the distribution and declare it with `server=server.js`. Choose a digest-pinned container only if profiling proves the sandbox unsuitable; no initial design here requires one.
+- `starhermit.txt` declares `server=score-script.js` (the leaderboard platform script); `server.js` stays in the distribution as the local dev server and rules contract. Choose a digest-pinned container only if profiling proves the sandbox unsuitable; no initial design here requires one.
 - Define control defaults, achievement metadata, and versioned settings before release. Publish immutable build assets, verify the launch path, maintain migration tests for saves, and expose no secret configuration to the client.
 - The client ships no telemetry pipeline of its own. Where the host measures funnels, restrict it to start, tutorial step, round end, retry, settings change, and error category, in aggregate only. Avoid raw text, precise personal data, and cross-title tracking.
 

@@ -42,6 +42,21 @@ export class Platform {
     return { hosted: true };
   }
 
+  /**
+   * Post a finished match total to the platform high-score board through the
+   * game's score script (score-script.js). Resolves { posted, rank }.
+   */
+  async submitScore(total) {
+    if (!this.hosted) return { posted: false, rank: null };
+    const keys = await this.sh.submitScores({ 'high-score': total });
+    if (!keys.includes('high-score')) return { posted: false, rank: null };
+    try {
+      const r = await this.sh.leaderboard('high-score', { pageSize: 100 });
+      const me = ((r && r.items) || []).find((i) => i.userId === this.sh.userId);
+      return { posted: true, rank: me ? me.rank : null };
+    } catch { return { posted: true, rank: null }; }
+  }
+
   canSignIn() { return !!(this.sh && this.sh.canSignIn()); }
   signIn() { return !!(this.sh && this.sh.signIn()); }
   /** Share link that friends the recipient and invites them back; null offline. */

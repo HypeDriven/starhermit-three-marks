@@ -1416,6 +1416,10 @@ export class UI {
       return a ? el('div', { class: 'ach-badge' }, `🏅 ${a.name}`) : null;
     });
 
+    // Signed in: unassisted Journey, Daily and Challenge matches post their
+    // total to the platform high-score board; the line shows the rank.
+    const posts = this.platform.hosted && ['journey', 'daily', 'challenge'].includes(result.mode) && !result.assistsUsed;
+    const lbLine = posts ? el('p', { class: 'results-sub', id: 'results-lb', role: 'status' }, shText('lbPosting')) : null;
     const sheet = el('div', { class: 'sheet results', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Match results' },
       el('h3', { class: won ? 'won' : result.outcome === 'draw' ? 'drew' : 'lost' }, headline),
       el('p', { class: 'results-sub' },
@@ -1430,9 +1434,16 @@ export class UI {
         : null,
       achBadges.length ? el('div', { class: 'ach-row' }, achBadges) : null,
       el('p', { class: 'results-sub' }, this._nextRecommendation(result)),
+      lbLine,
       el('div', { class: 'sheet-actions' }, actions),
     );
     this.openModal(sheet);
+    if (lbLine) {
+      this.platform.submitScore(result.breakdown.total).then((r) => {
+        lbLine.textContent = !r.posted ? shText('lbNotPosted')
+          : r.rank ? shText('lbRank', { rank: r.rank }) : shText('lbPosted');
+      });
+    }
     this.announce(`${headline}. Total score ${result.breakdown.total}.`);
     if (this.audio) this.audio.setMusicIntensity(0.1);
   }
