@@ -2,17 +2,21 @@
 // Owns the canvas and starts the render/UI shells; degrades to a clear
 // compatibility message (with the DOM board still usable) when WebGL fails.
 import { Platform } from './platform.js';
-import { Store, resolveConflict } from './storage.js';
+import { Store, mergeProgression, sameProgress } from './storage.js';
 import { AudioEngine } from './audio.js';
 import { GameSession, PHASE } from './session.js';
 import { BoardRenderer } from './render.js';
 import { UI, DEFAULT_BINDINGS } from './ui.js';
 import { shText } from './sh-i18n.js';
+import { t, locale } from './i18n.js';
 import { themeById, validateContent } from './content.js';
+
+let uiRef = null;
 
 async function boot() {
   const root = document.getElementById('app-root');
   const bootStatus = document.getElementById('boot-status');
+  if (bootStatus) bootStatus.textContent = t('bootChalking');
 
   const platform = new Platform();
   const store = new Store('player');
@@ -26,17 +30,18 @@ async function boot() {
 
   // Host handshake (degrades to local play when no launch token is present).
   const host = await platform.boot();
-  if (bootStatus) bootStatus.textContent = host.hosted ? 'Connected to host.' : 'Offline mode — full local play.';
+  if (bootStatus) bootStatus.textContent = t(host.hosted ? 'bootConnected' : 'bootOffline');
 
-  // Cloud save: when hosted, load the remote mirror once. A strict-descendant
-  // local document wins outright; any other conflict prefers the remote copy.
-  // localStorage remains the offline cache either way.
+  // Cloud save: when hosted, load the remote mirror once and merge it with
+  // the local document (best of both — see storage.mergeProgression); when
+  // the merge adds local progress the result is written back. localStorage
+  // remains the offline cache either way.
   if (host.hosted) {
     const remote = await platform.loadCloudSave();
     if (remote) {
-      const local = store.loadProgression();
-      const res = resolveConflict(local, remote);
-      if (res.winner !== local) store.saveProgression(remote);
+      const merged = mergeProgression(remote, store.loadProgression());
+      const sealed = store.saveProgression(merged);
+      if (!sameProgress(merged, remote)) platform.queueCloudSave(sealed);
     }
     // Platform-stored preferences and key bindings win over local ones.
     const prefs = await platform.loadPlatformSettings(settings);
@@ -52,6 +57,14 @@ async function boot() {
   // Mirror every saved progression document to the cloud slot (debounced;
   // the adapter no-ops when offline). The settings doc stays local-only.
   session.on('progress-saved', (doc) => platform.queueCloudSave(doc));
+  // Another device saved first: reload the cloud doc, merge it into the local
+  // progress (the match in play is untouched) and save the result again.
+  platform.onSaveConflict = async () => {
+    const remote = await platform.loadCloudSave();
+    const sealed = store.saveProgression(mergeProgression(remote, store.loadProgression()));
+    session.emit('progress-saved', sealed);
+    if (uiRef) uiRef._refreshTitleCards();
+  };
 
   // Capability detection: WebGL.
   const canvas = document.createElement('canvas');
@@ -75,15 +88,16 @@ async function boot() {
     const note = document.createElement('div');
     note.className = 'compat-note';
     note.setAttribute('role', 'status');
-    note.textContent = '3D rendering is unavailable in this browser, so the board is shown in simplified form. Your progress is safe.';
+    note.textContent = t('compatNote');
     root.append(note);
   }
 
   const ui = new UI({ root, session, renderer, audio, store, platform });
+  uiRef = ui;
   ui.canvasWrap.prepend(canvas);
   platform.onCloudSyncState = (state) => ui.updateSyncStatus(state);
   platform.onAuthChange = (a) => {
-    if (!a.signedIn) ui.toast(shText('signedOut'));
+    if (!a.signedIn) ui.toast(shText('signedOut', {}, locale()));
     ui._refreshIdentity();
   };
   ui.updateSyncStatus(platform.cloudSyncState);
@@ -126,7 +140,7 @@ async function boot() {
       renderer.start();
       ui.onResize();
       if (session.phase === PHASE.PAUSED && session.phaseReason === 'hidden') {
-        ui.openPauseModal('Paused while the tab was hidden.');
+        ui.openPauseModal('pausedHidden');
       }
     }
   });
@@ -197,5 +211,5 @@ function createFallbackRenderer(canvas) {
 boot().catch((err) => {
   console.error(err);
   const status = document.getElementById('boot-status');
-  if (status) status.textContent = 'Something went wrong while starting. Please reload.';
+  if (status) status.textContent = t('startError');
 });

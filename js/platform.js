@@ -17,6 +17,7 @@ export class Platform {
     this.onProfileLoaded = null; // UI hook
     this.onCloudSyncState = null; // UI hook: synced | saving | offline
     this.onAuthChange = null; // UI hook: ({signedIn})
+    this.onSaveConflict = null; // main.js hook: another device saved first
     this.cloudSyncState = 'offline';
     this.sessionId = randomId();
     this._pushedPrefs = {};
@@ -37,6 +38,9 @@ export class Platform {
       if (!a.signedIn) { this.nickname = null; this.setSyncState('offline'); }
       if (this.onAuthChange) this.onAuthChange(a);
     });
+    // A cloud write lost to a newer save from another device (conditional
+    // PUT → 412): writes stay blocked until the game reloads, merges and saves.
+    this.sh.on('saveconflict', () => { if (this.onSaveConflict) this.onSaveConflict(); });
     if (!this.hosted) return { hosted: false, reason: 'no-launch-token' };
     this.loadProfile().catch(() => {});
     return { hosted: true };
@@ -88,8 +92,8 @@ export class Platform {
 
   // ---- cloud saves ----
   // One slot (game:<slug>). The local checksummed document stays the offline
-  // cache; the cloud slot is a mirror that wins unless the local copy is a
-  // strict descendant.
+  // cache; the cloud slot is a mirror, merged with it at boot and after a
+  // save conflict (storage.mergeProgression).
   setSyncState(state) {
     if (this.cloudSyncState === state) return;
     this.cloudSyncState = state;

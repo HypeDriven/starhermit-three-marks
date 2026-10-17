@@ -84,14 +84,20 @@ export function presetTier(preset, cat) {
 }
 
 /** Short cost summary, e.g. "2048² shadows · ambient occlusion · bloom · SMAA · 1280×800 px". */
-export function describe(r, pixels) {
+const WORDS_EN = {
+  noShadows: 'no shadows', shadows: '{n}² shadows', ao: 'ambient occlusion', aoFull: 'full ambient occlusion',
+  bloom: 'bloom', reflections: 'reflections', noAA: 'no anti-aliasing', px: '{w}×{h} px',
+};
+/** Cost summary; `w` holds localized words (gfx-i18n.gfxWords), English by default. */
+export function describe(r, pixels, w = WORDS_EN) {
+  const f = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => v[k]);
   const parts = [
-    r.shadows === 'off' ? 'no shadows' : `${SHADOW_MAP[r.shadows]}² shadows`,
-    r.ao === 'off' ? null : r.ao === 'high' ? 'full ambient occlusion' : 'ambient occlusion',
-    r.bloom === 'on' ? 'bloom' : null,
-    r.reflections === 'on' ? 'reflections' : null,
-    r.antialias === 'off' ? 'no anti-aliasing' : r.antialias.toUpperCase(),
-    pixels ? `${pixels[0]}×${pixels[1]} px` : null,
+    r.shadows === 'off' ? w.noShadows : f(w.shadows, { n: SHADOW_MAP[r.shadows] }),
+    r.ao === 'off' ? null : r.ao === 'high' ? w.aoFull : w.ao,
+    r.bloom === 'on' ? w.bloom : null,
+    r.reflections === 'on' ? w.reflections : null,
+    r.antialias === 'off' ? w.noAA : r.antialias.toUpperCase(),
+    pixels ? f(w.px, { w: pixels[0], h: pixels[1] }) : null,
   ];
   return parts.filter(Boolean).join(' · ');
 }

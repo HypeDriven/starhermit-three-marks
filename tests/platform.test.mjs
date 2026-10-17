@@ -16,14 +16,25 @@ const JWT = `x.${b64url({ sub: 'u-12345678', game_scope: 'marks-test', exp: Math
 const DEFAULTS = { pause: ['KeyP'], undo: ['KeyU'] };
 
 function setup(hash, hostname = 'marks-test.starhermit.com') {
-  const calls = [], store = new Map();
+  const calls = [], store = new Map(), etags = new Map();
+  let version = 0;
   const fetch = async (url, init = {}) => {
     calls.push({ url, method: init.method || 'GET', body: init.body, auth: init.headers?.Authorization });
     const path = url.split('?')[0];
     const json = (o) => new Response(JSON.stringify(o));
     if (path.endsWith('/profile')) return json({ nickname: 'Noughts' });
     if (path.includes('/cloud-saves/')) {
-      if (init.method === 'PUT') { store.set(path, JSON.parse(init.body).dataBase64); return new Response(null, { status: 204 }); }
+      if (path.endsWith('/info')) {
+        const slot = path.slice(0, -5);
+        return json(store.has(slot) ? { exists: true, etag: etags.get(slot) } : { exists: false });
+      }
+      if (init.method === 'PUT') {
+        const match = init.headers?.['If-Match'];
+        if (match && match !== etags.get(path)) return new Response(JSON.stringify({ etag: etags.get(path) }), { status: 412 });
+        store.set(path, JSON.parse(init.body).dataBase64);
+        etags.set(path, '"v' + (++version) + '"');
+        return json({ etag: etags.get(path) });
+      }
       return store.has(path) ? new Response(Buffer.from(store.get(path), 'base64')) : new Response(null, { status: 404 });
     }
     if (path.endsWith('/settings')) return init.method === 'PATCH' ? new Response(null, { status: 204 }) : json({ settings: { theme: 'chalk' } });
@@ -35,7 +46,15 @@ function setup(hash, hostname = 'marks-test.starhermit.com') {
   };
   const location = { hash, search: '', pathname: '/', hostname };
   const win = { location, history: { state: null, replaceState: (_s, _t, u) => { location.hash = u.includes('#') ? u.slice(u.indexOf('#')) : ''; } } };
-  return { calls, sh: SDK.create({ window: win, fetch }), location };
+  const sh = SDK.create({ window: win, fetch });
+  // Another device writing the slot: this client's next conditional write is refused (412).
+  const otherDevice = async (doc) => {
+    const zipped = await sh._zip('save.json', new TextEncoder().encode(JSON.stringify(doc)));
+    const slot = [...store.keys()][0];
+    store.set(slot, Buffer.from(zipped).toString('base64'));
+    etags.set(slot, '"v' + (++version) + '"');
+  };
+  return { calls, sh, location, otherDevice };
 }
 
 test('launch token read + stripped; nickname from profile', async () => {
@@ -77,7 +96,8 @@ test('settings KV, controls overrides and rebinding persistence', async () => {
   p.saveBinding('undo', ['KeyZ']);
   p.resetBindings();
   await new Promise((r) => setTimeout(r, 10));
-  assert.deepEqual(JSON.parse(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/controls')).body), { bindings: { undo: ['KeyZ'] } });
+  // The SDK's setControl reads the stored overrides and writes the full set back.
+  assert.deepEqual(JSON.parse(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/controls')).body), { bindings: { pause: ['KeyQ'], undo: ['KeyZ'] } });
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/controls')));
   assert.match(p.inviteLink(), /game-invite\/u-12345678\/marks-test$/);
   sh.signOut();
@@ -100,9 +120,36 @@ test('standalone: no network calls', async () => {
 });
 
 test('sign-in offered on the platform host without a token', async () => {
-  const { sh, calls } = setup('');
+  const { sh, calls } = setup('', '0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com');
   const p = new Platform(sh);
   await p.boot();
   assert.equal(p.canSignIn(), true);
   assert.equal(calls.length, 0);
+});
+
+test('a save that loses to another device fires onSaveConflict; the merge keeps both devices\' progress', async () => {
+  const { mergeProgression, defaultProgression } = await import('../js/storage.js');
+  const { sh, otherDevice } = setup('#game_token=' + JWT);
+  const p = new Platform(sh);
+  try {
+    await p.boot();
+    await p.loadCloudSave();
+    const mine = { ...defaultProgression(), generation: 3, journey: { 'stage-1': { stars: 3, bestScore: 1500, completedAt: 5 } }, achievements: { first_line: { unlockedAt: 9 } } };
+    p.queueCloudSave(mine);
+    assert.equal(await p.flushCloudSave(), true);
+    const theirs = { ...defaultProgression(), generation: 7, journey: { 'stage-1': { stars: 1, bestScore: 900, completedAt: 2 }, 'stage-2': { stars: 2, bestScore: 1200, completedAt: 3 } }, lessons: { 'lesson-place': { completedAt: 1 } } };
+    await otherDevice(theirs);
+    let conflicts = 0;
+    p.onSaveConflict = () => { conflicts++; };
+    p.queueCloudSave({ ...mine, generation: 4 });
+    assert.equal(await p.flushCloudSave(), false);
+    assert.equal(conflicts, 1);
+    const merged = mergeProgression(await p.loadCloudSave(), mine);
+    assert.deepEqual(merged.journey['stage-1'], { stars: 3, bestScore: 1500, completedAt: 2 });
+    assert.equal(merged.journey['stage-2'].stars, 2);
+    assert.ok(merged.lessons['lesson-place'] && merged.achievements.first_line);
+    assert.equal(merged.generation, 7);
+    p.queueCloudSave(merged);
+    assert.equal(await p.flushCloudSave(), true);
+  } finally { sh.signOut(); }
 });

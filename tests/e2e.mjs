@@ -34,6 +34,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { launchToken, stubStarHermit } from './starhermit-e2e.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOT = (stage, vp) => `/tmp/three-marks-e2e-${stage}-${vp}.png`;
@@ -230,9 +231,9 @@ async function solveRound(page) {
 
 // ---------- navigate from title to Practice and start a single 3×3 round ----------
 async function startPracticeSetup(page, difficulty) {
-  await page.click('button.card:has-text("All Modes")');
+  await page.click('#btn-all-modes');
   await page.waitForSelector('#screen-modes', { state: 'visible' });
-  await page.click('button.mode-card:has-text("Practice")');
+  await page.click('.mode-card[data-mode="practice"]');
   await page.waitForSelector('#screen-practice', { state: 'visible' });
   await page.selectOption('#pr-diff', difficulty);
   await page.selectOption('#pr-board', '3');
@@ -253,9 +254,9 @@ async function startPracticeSetup(page, difficulty) {
 async function testGraphics(page, name) {
   const gfxSaved = () => page.evaluate(() => JSON.parse(localStorage.getItem('three-marks.player.settings') || '{}').graphics || {});
   const openSettings = async () => {
-    await page.click('button.card:has-text("Profile")');
+    await page.click('#btn-profile');
     await page.waitForSelector('#screen-profile', { state: 'visible' });
-    await page.click('#screen-profile .ghost-btn:has-text("Settings")');
+    await page.click('#btn-profile-settings');
     await page.waitForSelector('#screen-settings', { state: 'visible' });
     await page.locator('#gfx-preset').scrollIntoViewIfNeeded();
   };
@@ -344,23 +345,23 @@ async function runPass(browser, name, ctxOpts, { full }) {
       await page.click('#btn-pause');
       await page.waitForFunction(() => document.querySelector('#modal-root .sheet[aria-label="Paused"]'));
       await page.screenshot({ path: SHOT('pause', name) });
-      await page.click('#modal-root .primary-btn:has-text("Resume")');
+      await page.click('#modal-root [data-act="resume"]');
       await page.waitForFunction(() => window.__threeMarks.session.phase === 'active');
       ok(`${name}: pause (❚❚) and resume work`);
 
       // settings open/close via the pause sheet
       await page.click('#btn-pause');
-      await page.click('#modal-root .ghost-btn:has-text("Settings")');
+      await page.click('#modal-root [data-act="settings"]');
       await page.waitForSelector('#screen-settings', { state: 'visible' });
       await page.screenshot({ path: SHOT('settings', name) });
       await page.click('#screen-settings .back-btn');
       await page.waitForFunction(() => document.querySelector('#modal-root .sheet[aria-label="Paused"]'));
-      await page.click('#modal-root .primary-btn:has-text("Resume")');
+      await page.click('#modal-root [data-act="resume"]');
       await page.waitForFunction(() => window.__threeMarks.session.phase === 'active');
       ok(`${name}: settings open (from pause) and close back to the match`);
 
       // camera toggle cycle (cosmetic, safe, no rules impact)
-      await page.click('#rail-right .action-btn:has-text("Camera")');
+      await page.click('#btn-camera');
       const cam = await page.evaluate(() => window.__threeMarks.ui.settings.camera.angle);
       if (cam !== 'top') throw new Error(`camera did not cycle (angle now: ${cam})`);
       await page.waitForTimeout(700); // let the camera transition settle
@@ -372,13 +373,13 @@ async function runPass(browser, name, ctxOpts, { full }) {
       await clickCell(page, firstMove);
       const afterMove = await readState(page);
       if (afterMove.humanMarks !== before.humanMarks + 1) throw new Error('mark did not register on the board');
-      await page.click('#rail-right .action-btn:has-text("Undo")');
+      await page.click('#btn-undo');
       const afterUndo = await readState(page);
       if (afterUndo.humanMarks !== before.humanMarks) throw new Error('undo did not restore the board');
       ok(`${name}: place a mark → Undo restores the board (back to ${afterUndo.humanMarks} of your marks)`);
 
       // Hint button highlights a recommended cell (marks the match assisted)
-      await page.click('#rail-right .action-btn:has-text("Hint")');
+      await page.click('#btn-hint');
       await page.waitForFunction(() => !!(window.__threeMarks.session.match?.assists?.hintUsed));
       const afterHint = await readState(page);
       if (!afterHint.hintUsed) throw new Error('hint did not mark the match assisted');
@@ -451,6 +452,76 @@ async function runPass(browser, name, ctxOpts, { full }) {
   console.log(`ok - ${name}: no page errors`);
 }
 
+// ---------- language + report pass (signed in, stubbed StarHermit API) ----------
+// Automatic follows the account's preferred language (fr-CA); choosing another
+// language in Settings relabels the UI live and PUTs ui.language; a German
+// match shows German HUD text; switching back to Automatic from the pause menu
+// re-renders the match's text without restarting it; Report a problem posts.
+async function languagePass(browser, name, ctxOpts) {
+  const errors = [];
+  const context = await browser.newContext(ctxOpts);
+  const page = await context.newPage();
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if (!['error', 'warning'].includes(m.type()) || browserNoise.test(m.text())) return;
+    errors.push(`console: ${m.text()}`);
+  });
+  try {
+    const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+    await page.goto('about:blank');
+    await page.goto(BASE + '/index.html#game_token=' + launchToken(), { waitUntil: 'load' });
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA', null, { timeout: 15000 });
+    await page.waitForFunction(() => window.__threeMarks?.session?.phase === 'title');
+    if ((await page.textContent('#btn-play')).trim() !== 'Jouer') throw new Error('title not in fr-CA');
+    await page.click('#btn-profile');
+    await page.click('#btn-profile-settings');
+    const choice = page.locator('#screen-settings [data-game-language="choice"]');
+    await choice.scrollIntoViewIfNeeded();
+    const auto = await choice.locator('option').first().textContent();
+    if (auto !== 'Automatique — Français (Canada)') throw new Error(`Automatic label not resolved: "${auto}"`);
+    await choice.selectOption('it-IT');
+    await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+    await page.waitForFunction(() => /Salvato/.test(document.querySelector('[data-game-language="status"]').textContent));
+    if (calls.settings['ui.language']?.choice !== 'it-IT') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+    if ((await page.textContent('#screen-settings h2')).trim() !== 'Impostazioni') throw new Error('settings heading not relabelled');
+    if ((await page.textContent('#screen-settings [data-setting="muted"] span')).trim() !== 'Disattiva tutto l’audio') throw new Error('settings labels not relabelled');
+    await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+    await page.fill('[data-game-report="title"]', 'Test report');
+    await page.click('[data-game-report="send"]');
+    await page.waitForFunction(() => /Grazie/.test(document.querySelector('[data-game-report="status"]').textContent));
+    if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+    ok(`${name}: Automatic resolved fr-CA from the account; Italian applied live, saved to ui.language; report posted`);
+
+    await choice.selectOption('de-DE');
+    await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+    await page.click('#screen-settings .back-btn');
+    await page.click('#screen-profile .back-btn');
+    await page.click('#btn-play');
+    await page.waitForSelector('#hud', { state: 'visible' });
+    await waitActive(page);
+    const obj = (await page.textContent('#objective')).trim();
+    if (!/^Ziel:/.test(obj)) throw new Error(`HUD not German: "${obj}"`);
+    await page.screenshot({ path: SHOT('language-de', name) });
+    await page.click('#btn-pause');
+    if ((await page.textContent('#modal-root h3')).trim() !== 'Pausiert') throw new Error('pause sheet not German');
+    await page.click('#modal-root [data-act="settings"]');
+    await choice.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: SHOT('language-de-settings', name) });
+    await choice.selectOption('auto');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+    await page.click('#screen-settings .back-btn');
+    if ((await page.textContent('#modal-root h3')).trim() !== 'En pause') throw new Error('pause sheet not French');
+    await page.click('#modal-root [data-act="resume"]');
+    if (!/^Objectif :/.test(await page.textContent('#objective'))) throw new Error('HUD objective not re-rendered in French');
+    const cellLabel = await page.getAttribute('#cell-overlay .cell-btn', 'aria-label');
+    if (!/^Rangée 1, colonne 1/.test(cellLabel)) throw new Error(`board cells not relabelled: "${cellLabel}"`);
+    ok(`${name}: German match HUD, then Automatic (fr-CA) re-rendered HUD, pause sheet and board cells mid-match`);
+  } finally {
+    await context.close();
+  }
+  if (errors.length) throw new Error(`${name} language pass had page errors:\n  ${errors.join('\n  ')}`);
+}
+
 // ---------- main ----------
 let browser = null;
 try {
@@ -462,6 +533,8 @@ try {
   await runPass(browser, 'desktop', { viewport: { width: 1280, height: 800 } }, { full: true });
   await runPass(browser, 'mobile',
     { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }, { full: false });
+  await languagePass(browser, 'desktop-language', { viewport: { width: 1280, height: 800 } });
+  await languagePass(browser, 'mobile-language', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   console.log('\nE2E PASS — three-marks, desktop + mobile, no page errors');
 } catch (e) {
   failures++;

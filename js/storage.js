@@ -220,3 +220,56 @@ export function dailyStreak(dailies, todayIso) {
   }
   return streak;
 }
+
+// Progress from two devices, merged so neither side loses anything: per stage
+// the most stars, best score and earliest completion; lessons, challenges,
+// dailies and achievements united (best score / earliest unlock); counters
+// take the larger value (the two sides may share history, so they are not
+// summed). Either side may be null.
+export function mergeProgression(remote, local) {
+  if (!remote) return migrateProgression(local);
+  if (!local) return migrateProgression(remote);
+  const a = migrateProgression(remote), b = migrateProgression(local);
+  const minAt = (x, y) => (x && y ? Math.min(x, y) : x || y);
+  const journey = { ...a.journey };
+  for (const [id, r] of Object.entries(b.journey)) {
+    const p = journey[id];
+    journey[id] = !p ? r : { ...p, ...r, stars: Math.max(p.stars || 0, r.stars || 0), bestScore: Math.max(p.bestScore || 0, r.bestScore || 0), completedAt: minAt(p.completedAt, r.completedAt) };
+  }
+  const lessons = { ...a.lessons };
+  for (const [id, r] of Object.entries(b.lessons)) lessons[id] = lessons[id] ? { ...r, completedAt: minAt(lessons[id].completedAt, r.completedAt) } : r;
+  const challenges = { ...a.challenges };
+  for (const [id, r] of Object.entries(b.challenges)) {
+    const p = challenges[id];
+    challenges[id] = !p ? r : { ...p, ...r, bestScore: Math.max(p.bestScore || 0, r.bestScore || 0), completedAt: minAt(p.completedAt, r.completedAt) };
+  }
+  const dailies = { ...a.dailies };
+  for (const [id, r] of Object.entries(b.dailies)) {
+    const p = dailies[id];
+    dailies[id] = !p || (r.score || 0) > (p.score || 0) ? r : p;
+  }
+  const achievements = { ...a.achievements };
+  for (const [k, r] of Object.entries(b.achievements)) {
+    achievements[k] = achievements[k] ? { ...r, unlockedAt: minAt(achievements[k].unlockedAt, r.unlockedAt) } : r;
+  }
+  const byMode = { ...a.stats.byMode };
+  for (const [mode, r] of Object.entries(b.stats.byMode)) {
+    const p = byMode[mode] || {};
+    byMode[mode] = { ...p, ...r, played: Math.max(p.played || 0, r.played || 0), won: Math.max(p.won || 0, r.won || 0) };
+  }
+  const stat = (k) => Math.max(a.stats[k] || 0, b.stats[k] || 0);
+  const out = {
+    ...a, ...b, journey, lessons, challenges, dailies, achievements,
+    stats: { ...a.stats, ...b.stats, roundsPlayed: stat('roundsPlayed'), roundsWon: stat('roundsWon'), roundsDrawn: stat('roundsDrawn'), totalScore: stat('totalScore'), byMode },
+    generation: Math.max(a.generation || 0, b.generation || 0),
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+  };
+  delete out.checksum;
+  return out;
+}
+
+/** True when two progression docs hold the same progress (ignoring version stamps). */
+export function sameProgress(x, y) {
+  const strip = (d) => { const c = { ...(d || {}) }; delete c.checksum; delete c.generation; delete c.updatedAt; return JSON.stringify(c); };
+  return strip(x) === strip(y);
+}

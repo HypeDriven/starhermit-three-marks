@@ -10,8 +10,14 @@ import {
 import { ACHIEVEMENTS } from './storage.js';
 import { PHASE } from './session.js';
 import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
-import { gfxStrings } from './gfx-i18n.js';
+import { gfxStrings, gfxWords } from './gfx-i18n.js';
 import { shText } from './sh-i18n.js';
+import {
+  t, tx, txf, lv, locale, onLanguage, stageName, stageBlurb, chapterName, lessonText, challengeText,
+  themeName, rulesetName, achievementText, aiName, playerName, scoreLabel, bindAttr,
+} from './i18n.js';
+
+const sh = (key, vars) => shText(key, vars || {}, locale());
 
 // KeyboardEvent.code values — mirrors the control.* lines in starhermit.txt.
 export const DEFAULT_BINDINGS = {
@@ -39,11 +45,12 @@ export function codeLabel(c) {
   return c;
 }
 
-const BINDING_LABELS = {
-  confirm: 'Place mark / confirm', cancel: 'Cancel / back', pause: 'Pause',
-  undo: 'Undo (where allowed)', hint: 'Hint (practice)', cameraReset: 'Reset camera',
-  up: 'Move selection up', down: 'Move selection down', left: 'Move selection left', right: 'Move selection right',
+const BINDING_KEYS = {
+  confirm: 'bindConfirm', cancel: 'bindCancel', pause: 'bindPause',
+  undo: 'bindUndo', hint: 'bindHint', cameraReset: 'bindCameraReset',
+  up: 'bindUp', down: 'bindDown', left: 'bindLeft', right: 'bindRight',
 };
+const bindingLabel = (action) => (BINDING_KEYS[action] ? t(BINDING_KEYS[action]) : action);
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -52,6 +59,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k === 'dataset') Object.assign(node.dataset, v);
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
     else if (k === 'html') node.innerHTML = v;
+    else if (v && typeof v === 'object' && typeof v.live === 'function') bindAttr(node, k, v.live);
     else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v === true ? '' : v);
   }
   for (const c of children.flat()) {
@@ -67,13 +75,14 @@ function fmtTime(ms) {
 }
 
 const MODE_META = {
-  learn: { name: 'Learn', desc: 'Interactive lessons. One rule at a time — you perform every action.', duration: '~3 min', players: 'Solo', ranked: false },
-  journey: { name: 'Journey', desc: 'Forty authored stages across five chapters, with mastery tests.', duration: '2–10 min', players: 'Solo vs AI', ranked: false },
-  daily: { name: 'Daily', desc: 'One shared seed and ruleset per UTC day. Same slate for everyone.', duration: '~2 min', players: 'Solo vs AI', ranked: true },
-  practice: { name: 'Practice', desc: 'Free play against the AI. Undo and hints allowed; never rated.', duration: 'You choose', players: 'Solo vs AI', ranked: false },
-  challenge: { name: 'Challenge', desc: 'Constrained goals: clocks, move limits, sealed cells, misère.', duration: '1–5 min', players: 'Solo vs AI', ranked: false },
-  hosted: { name: 'Hosted Play', desc: 'Head-to-head hosted matches are not available in this build.', duration: '—', players: '2 players', ranked: false },
+  learn: { name: 'modeLearn', desc: 'modeLearnDesc', duration: 'durLearn', players: 'playersSolo', ranked: false },
+  journey: { name: 'modeJourney', desc: 'modeJourneyDesc', duration: 'durJourney', players: 'playersSoloAi', ranked: false },
+  daily: { name: 'modeDaily', desc: 'modeDailyDesc', duration: 'durDaily', players: 'playersSoloAi', ranked: true },
+  practice: { name: 'modePractice', desc: 'modePracticeDesc', duration: 'durPractice', players: 'playersSoloAi', ranked: false },
+  challenge: { name: 'modeChallenge', desc: 'modeChallengeDesc', duration: 'durChallenge', players: 'playersSoloAi', ranked: false },
+  hosted: { name: 'modeHosted', desc: 'modeHostedDesc', duration: 'durHosted', players: 'playersTwo', ranked: false },
 };
+const CAMERA_KEYS = { standard: 'camStandard', top: 'camTop', low: 'camLow' };
 
 export class UI {
   constructor({ root, session, renderer, audio, store, platform }) {
@@ -98,6 +107,33 @@ export class UI {
     this.applySettings(this.settings);
     this.platform.onProfileLoaded = () => this._refreshIdentity();
     this._refreshIdentity();
+    onLanguage(() => this.relabel());
+  }
+
+  /**
+   * Language changed: live text nodes are already rewritten (i18n.js); this
+   * re-renders everything built from data in place — lists on the current
+   * screen, HUD, cell labels, bindings, graphics labels and any open sheet —
+   * without restarting the match.
+   */
+  relabel() {
+    this._refreshTitleCards();
+    this._refreshIdentity();
+    this.updateSyncStatus(this._syncState || this.platform.cloudSyncState);
+    this._renderBindingsEditor();
+    this._refreshHelpBindings();
+    this._relabelGraphics();
+    if (this.screen === 'journey') this._refreshJourney();
+    if (this.screen === 'challenges') this._refreshChallenges();
+    if (this.screen === 'lessons') this._refreshLessons();
+    if (this.screen === 'achievements') this._refreshAchievements();
+    if (this.screen === 'profile') this._refreshProfile();
+    // The HUD is hidden while Settings is open from the pause menu; relabel it anyway.
+    if (this.session.match && this.session.state && this.cellButtons) {
+      this._updateHudChrome();
+      this._updateCellLabels();
+    }
+    if (this.modal && this._modalRender) this._modalRender();
   }
 
   // ================= DOM skeleton =================
@@ -106,8 +142,8 @@ export class UI {
     this.root.innerHTML = '';
     this.root.id = 'app';
 
-    this.canvasWrap = el('div', { id: 'canvas-wrap', role: 'application', 'aria-label': 'Three Marks board' });
-    this.cellOverlay = el('div', { id: 'cell-overlay', role: 'grid', 'aria-label': 'Board cells' });
+    this.canvasWrap = el('div', { id: 'canvas-wrap', role: 'application', 'aria-label': lv('boardLabel') });
+    this.cellOverlay = el('div', { id: 'cell-overlay', role: 'grid', 'aria-label': lv('boardCells') });
     this.canvasWrap.append(this.cellOverlay);
 
     // HUD
@@ -115,18 +151,18 @@ export class UI {
     this.objectiveEl = el('div', { id: 'objective', role: 'status' });
     this.turnBanner = el('div', { id: 'turn-banner' });
     this.clockEl = el('div', { id: 'clock-display' });
-    this.btnPause = el('button', { id: 'btn-pause', class: 'icon-btn', 'aria-label': 'Pause', onclick: () => this.pauseGame() }, 'II');
-    this.hudNameEl = el('div', { id: 'player-name', 'aria-label': 'Player' });
+    this.btnPause = el('button', { id: 'btn-pause', class: 'icon-btn', 'aria-label': lv('pause'), onclick: () => this.pauseGame() }, 'II');
+    this.hudNameEl = el('div', { id: 'player-name', 'aria-label': lv('player') });
     this.syncEl = el('div', { id: 'sync-status', role: 'status' });
     const hudTop = el('div', { id: 'hud-top' }, this.objectiveEl, this.turnBanner, this.clockEl, this.btnPause, this.hudNameEl, this.syncEl);
 
-    this.railLeft = el('aside', { id: 'rail-left', 'aria-label': 'Match progress' });
-    this.railRight = el('aside', { id: 'rail-right', 'aria-label': 'Actions' });
-    this.btnUndo = el('button', { class: 'action-btn', onclick: () => this.doUndo() }, 'Undo');
-    this.btnHint = el('button', { class: 'action-btn', onclick: () => this.doHint() }, 'Hint');
-    this.btnCamera = el('button', { class: 'action-btn', onclick: () => this.cycleCamera() }, 'Camera');
+    this.railLeft = el('aside', { id: 'rail-left', 'aria-label': lv('matchProgress') });
+    this.railRight = el('aside', { id: 'rail-right', 'aria-label': lv('actions') });
+    this.btnUndo = el('button', { class: 'action-btn', id: 'btn-undo', onclick: () => this.doUndo() }, tx('undo'));
+    this.btnHint = el('button', { class: 'action-btn', id: 'btn-hint', onclick: () => this.doHint() }, tx('hint'));
+    this.btnCamera = el('button', { class: 'action-btn', id: 'btn-camera', onclick: () => this.cycleCamera() }, tx('camera'));
     this.railRight.append(
-      el('h3', { class: 'rail-title' }, 'Actions'),
+      el('h3', { class: 'rail-title' }, tx('actions')),
       this.btnUndo, this.btnHint, this.btnCamera
     );
     this.hud.append(hudTop, this.railLeft, this.railRight);
@@ -161,26 +197,26 @@ export class UI {
     this.screenTitle = el('section', { class: 'screen', id: 'screen-title', 'aria-labelledby': 'title-h' },
       el('div', { class: 'title-hero' },
         el('h1', { id: 'title-h' }, 'Three Marks'),
-        el('p', { class: 'tagline' }, 'Alternate marks on the slate. Complete a row, column, or diagonal.'),
+        el('p', { class: 'tagline' }, tx('tagline')),
         this.titleNameEl,
         el('button', {
           id: 'btn-play', class: 'primary-btn big', onclick: () => this.quickPlay(),
-        }, 'Play'),
+        }, tx('play')),
         this.session.hasLocalSnapshot()
-          ? el('button', { class: 'ghost-btn resume-btn', onclick: () => this.resumeSnapshot() }, 'Resume interrupted match')
+          ? el('button', { class: 'ghost-btn resume-btn', onclick: () => this.resumeSnapshot() }, tx('resumeInterrupted'))
           : null,
         el('div', { class: 'title-account' },
-          this.signInBtn = el('button', { id: 'btn-signin', class: 'ghost-btn', hidden: !this.platform.canSignIn(), onclick: () => this.platform.signIn() }, shText('signIn')),
+          this.signInBtn = el('button', { id: 'btn-signin', class: 'ghost-btn', hidden: !this.platform.canSignIn(), onclick: () => this.platform.signIn() }, txf(() => sh('signIn'))),
           ' ',
-          this.inviteBtn = el('button', { id: 'btn-invite', class: 'ghost-btn', hidden: !this.platform.inviteLink(), onclick: () => this.copyInvite() }, shText('invite'))),
+          this.inviteBtn = el('button', { id: 'btn-invite', class: 'ghost-btn', hidden: !this.platform.inviteLink(), onclick: () => this.copyInvite() }, txf(() => sh('invite')))),
       ),
       el('div', { class: 'title-cards' },
         this.titleDailyCard,
         this.titleJourneyCard,
-        el('button', { class: 'card', onclick: () => this.showScreen('modes') },
-          el('strong', {}, 'All Modes'), el('span', {}, 'Learn · Practice · Challenge · Hosted')),
-        el('button', { class: 'card', onclick: () => this.showScreen('profile') },
-          el('strong', {}, 'Profile'), el('span', {}, 'Progress, achievements, settings')),
+        el('button', { class: 'card', id: 'btn-all-modes', onclick: () => this.showScreen('modes') },
+          el('strong', {}, tx('allModes')), el('span', {}, tx('allModesSub'))),
+        el('button', { class: 'card', id: 'btn-profile', onclick: () => this.showScreen('profile') },
+          el('strong', {}, tx('profile')), el('span', {}, tx('profileSub'))),
       ),
     );
     this.screens.append(this.screenTitle);
@@ -193,20 +229,20 @@ export class UI {
     const done = prog.dailies[daily.id];
     this.titleDailyCard.innerHTML = '';
     this.titleDailyCard.append(
-      el('strong', {}, 'Daily Challenge'),
-      el('span', {}, `${daily.rulesetName} — ${done ? `done, best ${done.score}` : 'not played yet'}`),
+      el('strong', {}, t('dailyChallenge')),
+      el('span', {}, done ? t('dailyDone', { name: rulesetName(daily.rulesetName), score: done.score }) : t('dailyNotPlayed', { name: rulesetName(daily.rulesetName) })),
     );
     const doneStages = Object.values(prog.journey).filter((j) => j.stars > 0).length;
     const stars = Object.values(prog.journey).reduce((s, j) => s + (j.stars || 0), 0);
     this.titleJourneyCard.innerHTML = '';
     this.titleJourneyCard.append(
-      el('strong', {}, 'Journey'),
-      el('span', {}, `${doneStages}/40 stages · ${stars} stars`),
+      el('strong', {}, t('journey')),
+      el('span', {}, t('journeyCard', { done: doneStages, stars })),
     );
     // Keep the resume affordance in sync with the stored snapshot.
     const existing = this.screenTitle.querySelector('.resume-btn');
     if (this.session.hasLocalSnapshot() && !existing) {
-      const btn = el('button', { class: 'ghost-btn resume-btn', onclick: () => this.resumeSnapshot() }, 'Resume interrupted match');
+      const btn = el('button', { class: 'ghost-btn resume-btn', onclick: () => this.resumeSnapshot() }, tx('resumeInterrupted'));
       this.screenTitle.querySelector('.title-hero').append(btn);
     } else if (!this.session.hasLocalSnapshot() && existing) {
       existing.remove();
@@ -217,18 +253,19 @@ export class UI {
     const cards = Object.entries(MODE_META).map(([mode, meta]) =>
       el('button', {
         class: 'mode-card',
+        'data-mode': mode,
         onclick: () => this.openMode(mode),
       },
-        el('h3', {}, meta.name),
-        el('p', {}, meta.desc),
+        el('h3', {}, tx(meta.name)),
+        el('p', {}, tx(meta.desc)),
         el('dl', { class: 'mode-facts' },
-          el('div', {}, el('dt', {}, 'Duration'), el('dd', {}, meta.duration)),
-          el('div', {}, el('dt', {}, 'Players'), el('dd', {}, meta.players)),
-          el('div', {}, el('dt', {}, 'Ranked'), el('dd', {}, meta.ranked ? 'Yes' : 'No')),
+          el('div', {}, el('dt', {}, tx('duration')), el('dd', {}, tx(meta.duration))),
+          el('div', {}, el('dt', {}, tx('players')), el('dd', {}, tx(meta.players))),
+          el('div', {}, el('dt', {}, tx('ranked')), el('dd', {}, tx(meta.ranked ? 'yes' : 'no'))),
         ),
       ));
     this.screenModes = el('section', { class: 'screen', id: 'screen-modes', hidden: true, 'aria-labelledby': 'modes-h' },
-      this._screenHeader('Choose a Mode', 'Every mode shows its rules before you commit.'),
+      this._screenHeader('chooseMode', 'chooseModeSub'),
       el('div', { class: 'mode-grid' }, cards),
     );
     this.screens.append(this.screenModes);
@@ -237,7 +274,7 @@ export class UI {
   _buildJourneyScreen() {
     this.journeyList = el('div', { class: 'stage-list' });
     this.screenJourney = el('section', { class: 'screen', id: 'screen-journey', hidden: true, 'aria-labelledby': 'journey-h' },
-      this._screenHeader('Journey', 'One new idea at a time — then a mastery test.'),
+      this._screenHeader('journey', 'journeySub'),
       this.journeyList,
     );
     this.screens.append(this.screenJourney);
@@ -248,7 +285,7 @@ export class UI {
     this.journeyList.innerHTML = '';
     JOURNEY_STAGES.forEach((stage, i) => {
       if (i % 8 === 0) {
-        this.journeyList.append(el('h3', { class: 'chapter-title' }, `Chapter ${stage.chapter + 1} — ${CHAPTERS[stage.chapter].name}`));
+        this.journeyList.append(el('h3', { class: 'chapter-title' }, t('chapter', { n: stage.chapter + 1, name: chapterName(stage.chapter, CHAPTERS[stage.chapter].name) })));
       }
       const rec = prog.journey[stage.id];
       const prevDone = i === 0 || (prog.journey[JOURNEY_STAGES[i - 1].id]?.stars || 0) > 0;
@@ -260,8 +297,8 @@ export class UI {
         onclick: () => { if (!locked) this.openStageSheet(stage); },
       },
         el('span', { class: 'stage-num' }, String(stage.index)),
-        el('span', { class: 'stage-name' }, stage.name, el('small', {}, stage.blurb)),
-        el('span', { class: 'stars', 'aria-label': `${stars} of 3 stars` }, '★'.repeat(stars) + '☆'.repeat(3 - stars)),
+        el('span', { class: 'stage-name' }, stageName(stage), el('small', {}, stageBlurb(stage))),
+        el('span', { class: 'stars', 'aria-label': t('starsOf3', { n: stars }) }, '★'.repeat(stars) + '☆'.repeat(3 - stars)),
       ));
     });
   }
@@ -270,7 +307,7 @@ export class UI {
     const list = el('div', { class: 'card-list' });
     this.challengeList = list;
     this.screenChallenges = el('section', { class: 'screen', id: 'screen-challenges', hidden: true, 'aria-labelledby': 'chal-h' },
-      this._screenHeader('Challenges', 'Constrained goals for a sharp session.'),
+      this._screenHeader('challenges', 'challengesSub'),
       list,
     );
     this.screens.append(this.screenChallenges);
@@ -282,9 +319,9 @@ export class UI {
     for (const c of CHALLENGES) {
       const rec = prog.challenges[c.id];
       this.challengeList.append(el('button', { class: 'card row', onclick: () => this.openChallengeSheet(c) },
-        el('strong', {}, c.name),
-        el('span', {}, c.blurb),
-        el('em', {}, rec ? `Completed · best ${rec.bestScore}` : c.goalText),
+        el('strong', {}, challengeText(c, 0, c.name)),
+        el('span', {}, challengeText(c, 1, c.blurb)),
+        el('em', {}, rec ? t('completedBest', { score: rec.bestScore }) : challengeText(c, 2, c.goalText)),
       ));
     }
   }
@@ -292,7 +329,7 @@ export class UI {
   _buildLessonsScreen() {
     this.lessonList = el('div', { class: 'card-list' });
     this.screenLessons = el('section', { class: 'screen', id: 'screen-lessons', hidden: true, 'aria-labelledby': 'learn-h' },
-      this._screenHeader('Learn', 'Short interactive lessons. Replay any time.'),
+      this._screenHeader('learn', 'learnSub'),
       this.lessonList,
     );
     this.screens.append(this.screenLessons);
@@ -304,39 +341,39 @@ export class UI {
     for (const l of LESSONS) {
       const done = !!prog.lessons[l.id];
       this.lessonList.append(el('button', { class: 'card row', onclick: () => this.startLesson(l) },
-        el('strong', {}, `${done ? '✓ ' : ''}${l.name}`),
-        el('span', {}, l.intro),
+        el('strong', {}, `${done ? '✓ ' : ''}${lessonText(l, 'name', l.name)}`),
+        el('span', {}, lessonText(l, 'intro', l.intro)),
       ));
     }
   }
 
   _buildPracticeScreen() {
     this.practiceDifficulty = el('select', { id: 'pr-diff' },
-      el('option', { value: 'casual' }, 'Casual — learning the ropes'),
-      el('option', { value: 'skilled', selected: true }, 'Skilled — a real game'),
-      el('option', { value: 'expert' }, 'Expert — solved, perfect play'));
+      el('option', { value: 'casual' }, tx('diffCasualOpt')),
+      el('option', { value: 'skilled', selected: true }, tx('diffSkilledOpt')),
+      el('option', { value: 'expert' }, tx('diffExpertOpt')));
     this.practiceBoard = el('select', { id: 'pr-board' },
-      el('option', { value: '3', selected: true }, '3×3 — classic'),
-      el('option', { value: '4' }, '4×4 — line of 4'),
-      el('option', { value: '5' }, '5×5 — line of 4'));
+      el('option', { value: '3', selected: true }, tx('board3')),
+      el('option', { value: '4' }, tx('board4')),
+      el('option', { value: '5' }, tx('board5')));
     this.practiceSeries = el('select', { id: 'pr-series' },
-      el('option', { value: '1', selected: true }, 'Single round'),
-      el('option', { value: '3' }, 'Best of 3'),
-      el('option', { value: '5' }, 'Best of 5'));
+      el('option', { value: '1', selected: true }, tx('seriesSingle')),
+      el('option', { value: '3' }, tx('seriesBo3')),
+      el('option', { value: '5' }, tx('seriesBo5')));
     this.practiceSide = el('select', { id: 'pr-side' },
-      el('option', { value: '1', selected: true }, 'You open (X)'),
-      el('option', { value: '2' }, 'AI opens (you are O)'));
+      el('option', { value: '1', selected: true }, tx('sideX')),
+      el('option', { value: '2' }, tx('sideO')));
     this.screenPractice = el('section', { class: 'screen', id: 'screen-practice', hidden: true, 'aria-labelledby': 'prac-h' },
-      this._screenHeader('Practice Setup', 'Free play. Undo and hints are allowed; results are never rated.'),
+      this._screenHeader('practiceSetup', 'practiceSetupSub'),
       el('form', { class: 'setup-form', onsubmit: (e) => { e.preventDefault(); this.startPractice(); } },
-        el('label', {}, 'Difficulty', this.practiceDifficulty),
-        el('label', {}, 'Board', this.practiceBoard),
-        el('label', {}, 'Series', this.practiceSeries),
-        el('label', {}, 'Side', this.practiceSide),
+        el('label', {}, tx('difficulty'), this.practiceDifficulty),
+        el('label', {}, tx('board'), this.practiceBoard),
+        el('label', {}, tx('series'), this.practiceSeries),
+        el('label', {}, tx('side'), this.practiceSide),
         el('div', { class: 'mode-facts inline' },
-          el('span', {}, 'Players: Solo vs AI'), el('span', {}, 'Ranked: No'),
-          el('span', {}, 'Assists: undo, hints')),
-        el('button', { class: 'primary-btn', type: 'submit' }, 'Start Practice'),
+          el('span', {}, tx('factPlayers')), el('span', {}, tx('factRanked')),
+          el('span', {}, tx('factAssists'))),
+        el('button', { class: 'primary-btn', type: 'submit', id: 'btn-start-practice' }, tx('startPractice')),
       ),
     );
     this.screens.append(this.screenPractice);
@@ -345,7 +382,7 @@ export class UI {
   _buildAchievementsScreen() {
     this.achList = el('ul', { class: 'ach-list' });
     this.screenAchievements = el('section', { class: 'screen', id: 'screen-achievements', hidden: true, 'aria-labelledby': 'ach-h' },
-      this._screenHeader('Achievements', 'Long-term goals, visible without pressure.'),
+      this._screenHeader('achievements', 'achievementsSub'),
       this.achList,
     );
     this.screens.append(this.screenAchievements);
@@ -357,9 +394,9 @@ export class UI {
     for (const a of ACHIEVEMENTS) {
       const got = prog.achievements[a.key];
       this.achList.append(el('li', { class: got ? 'unlocked' : 'locked' },
-        el('strong', {}, a.name),
-        el('span', {}, a.desc),
-        el('em', {}, got ? `Unlocked ${new Date(got.unlockedAt).toLocaleDateString()}` : 'Locked'),
+        el('strong', {}, achievementText(a, 0)),
+        el('span', {}, achievementText(a, 1)),
+        el('em', {}, got ? t('unlockedOn', { date: new Date(got.unlockedAt).toLocaleDateString(locale()) }) : t('locked')),
       ));
     }
   }
@@ -367,26 +404,26 @@ export class UI {
   _buildHelpScreen() {
     this.helpBindings = el('div', { class: 'rule-cards' });
     this.screenHelp = el('section', { class: 'screen', id: 'screen-help', hidden: true, 'aria-labelledby': 'help-h' },
-      this._screenHeader('How to Play', 'Rules and controls, generated from your current setup.'),
+      this._screenHeader('howToPlay', 'howToPlaySub'),
       el('div', { class: 'rule-cards' },
-        this._ruleCard('The Goal', 'Complete a row, column, or diagonal of your marks before your rival completes theirs.', [['X', 'X', 'X'], ['O', '', 'O'], ['', '', '']]),
-        this._ruleCard('Taking Turns', 'Players alternate one mark at a time on empty cells. The turn banner shows whose move it is.', [['X', 'O', ''], ['', 'X', ''], ['O', '', '']]),
-        this._ruleCard('The Draw', 'If the board fills with no line complete, the round is an honest draw.', [['X', 'O', 'X'], ['X', 'O', 'O'], ['O', 'X', 'X']]),
-        this._ruleCard('Variants', 'Journey and Challenge modes add sealed cells, move limits, clocks, larger boards, and misère rounds where completing a line loses.', [['X', '■', 'O'], ['', 'X', ''], ['O', '', '']]),
+        this._ruleCard('ruleGoal', [['X', 'X', 'X'], ['O', '', 'O'], ['', '', '']]),
+        this._ruleCard('ruleTurns', [['X', 'O', ''], ['', 'X', ''], ['O', '', '']]),
+        this._ruleCard('ruleDraw', [['X', 'O', 'X'], ['X', 'O', 'O'], ['O', 'X', 'X']]),
+        this._ruleCard('ruleVariants', [['X', '■', 'O'], ['', 'X', ''], ['O', '', '']]),
       ),
-      el('h3', {}, 'Your Controls'),
+      el('h3', {}, tx('yourControls')),
       this.helpBindings,
-      el('h3', {}, 'Gamepad'),
-      el('p', { class: 'help-note' }, 'D-pad or left stick moves the selection, the south button places a mark, the east button cancels, and the menu button pauses.'),
+      el('h3', {}, tx('gamepad')),
+      el('p', { class: 'help-note' }, tx('gamepadText')),
     );
     this.screens.append(this.screenHelp);
   }
 
-  _ruleCard(title, text, grid) {
+  _ruleCard(key, grid) {
     return el('div', { class: 'rule-card' },
-      el('h4', {}, title),
-      el('p', {}, text),
-      el('div', { class: 'mini-board', role: 'img', 'aria-label': `Example board for: ${title}` },
+      el('h4', {}, tx(key)),
+      el('p', {}, tx(key + 'Text')),
+      el('div', { class: 'mini-board', role: 'img', 'aria-label': { live: () => t('exampleBoard', { title: t(key) }) } },
         grid.flat().map((c) => el('span', { class: c === 'X' ? 'm-x' : c === 'O' ? 'm-o' : c === '■' ? 'm-block' : '' }, c || '·'))),
     );
   }
@@ -396,7 +433,7 @@ export class UI {
     this.helpBindings.innerHTML = '';
     for (const [action, keys] of Object.entries(bindings)) {
       this.helpBindings.append(el('div', { class: 'binding-row' },
-        el('span', {}, BINDING_LABELS[action] || action),
+        el('span', {}, bindingLabel(action)),
         el('kbd', {}, keys.map(codeLabel).join(' / ')),
       ));
     }
@@ -404,60 +441,60 @@ export class UI {
 
   _buildSettingsScreen() {
     const s = this.settings;
-    const slider = (key, label) => el('label', { class: 'slider-row' }, label,
+    const slider = (key, label) => el('label', { class: 'slider-row' }, tx(label),
       el('input', {
         type: 'range', min: 0, max: 1, step: 0.05, value: s.audio[key],
         oninput: (e) => this.updateSetting(`audio.${key}`, parseFloat(e.target.value)),
-        'aria-label': label,
+        'aria-label': lv(label),
       }));
-    this.setMusic = slider('music', 'Music');
-    this.setEffects = slider('effects', 'Effects');
-    this.setAmbience = slider('ambience', 'Ambience');
-    this.setVoice = slider('voice', 'Voice');
+    this.setMusic = slider('music', 'music');
+    this.setEffects = slider('effects', 'effects');
+    this.setAmbience = slider('ambience', 'ambience');
+    this.setVoice = slider('voice', 'voice');
     this.setMuted = el('input', { type: 'checkbox', onchange: (e) => this.updateSetting('audio.muted', e.target.checked) });
 
     const gfxRows = this._buildGraphicsControls();
 
     const toggle = (key, label) => {
       const input = el('input', { type: 'checkbox', onchange: (e) => this.updateSetting(`accessibility.${key}`, e.target.checked) });
-      return { input, row: el('label', { class: 'toggle-row' }, input, el('span', {}, label)) };
+      return { input, row: el('label', { class: 'toggle-row', 'data-setting': key }, input, el('span', {}, tx(label))) };
     };
-    this.togReduced = toggle('reducedMotion', 'Reduced motion');
-    this.togContrast = toggle('highContrast', 'High contrast');
-    this.togLargerText = toggle('largerText', 'Larger text');
-    this.togLefty = toggle('leftHanded', 'Left-handed controls');
-    this.togConfirm = toggle('confirmMoves', 'Confirm before placing (tap twice)');
-    this.togTiming = toggle('timingAssist', 'Timing assistance (+50% clocks, unranked)');
-    this.togHaptics = toggle('haptics', 'Haptics');
+    this.togReduced = toggle('reducedMotion', 'reducedMotion');
+    this.togContrast = toggle('highContrast', 'highContrast');
+    this.togLargerText = toggle('largerText', 'largerText');
+    this.togLefty = toggle('leftHanded', 'leftHanded');
+    this.togConfirm = toggle('confirmMoves', 'confirmMoves');
+    this.togTiming = toggle('timingAssist', 'timingAssist');
+    this.togHaptics = toggle('haptics', 'haptics');
 
     this.setPalette = el('select', { onchange: (e) => this.updateSetting('accessibility.palette', e.target.value) },
-      el('option', { value: 'default' }, 'Default colors'),
-      el('option', { value: 'deuteranopia' }, 'Deuteranopia-safe'),
-      el('option', { value: 'tritanopia' }, 'Tritanopia-safe'));
+      el('option', { value: 'default' }, tx('palDefault')),
+      el('option', { value: 'deuteranopia' }, tx('palDeuteranopia')),
+      el('option', { value: 'tritanopia' }, tx('palTritanopia')));
     this.setCamera = el('select', { onchange: (e) => this.updateSetting('camera.angle', e.target.value) },
-      el('option', { value: 'standard' }, 'Standard'), el('option', { value: 'top' }, 'Top-down'), el('option', { value: 'low' }, 'Low angle'));
+      el('option', { value: 'standard' }, tx('camStandard')), el('option', { value: 'top' }, tx('camTop')), el('option', { value: 'low' }, tx('camLow')));
     this.setTheme = el('select', { onchange: (e) => this.updateSetting('theme', e.target.value) },
-      THEMES.map((t) => el('option', { value: t.id }, t.name)));
+      THEMES.map((th) => el('option', { value: th.id }, txf(() => themeName(th)))));
     this.bindingsEditor = el('div', { class: 'bindings-editor' });
 
     this.screenSettings = el('section', { class: 'screen', id: 'screen-settings', hidden: true, 'aria-labelledby': 'set-h' },
-      this._screenHeader('Settings', 'Everything takes effect immediately.'),
+      this._screenHeader('settings', 'settingsSub'),
       el('div', { class: 'settings-grid' },
-        el('fieldset', {}, el('legend', {}, 'Audio'),
+        el('fieldset', {}, el('legend', {}, tx('audio')),
           this.setMusic, this.setEffects, this.setAmbience, this.setVoice,
-          el('label', { class: 'toggle-row' }, this.setMuted, el('span', {}, 'Mute all'))),
-        el('fieldset', { id: 'gfx-section', class: 'gfx-section' }, el('legend', {}, 'Graphics'),
+          el('label', { class: 'toggle-row', 'data-setting': 'muted' }, this.setMuted, el('span', {}, tx('muteAll')))),
+        el('fieldset', { id: 'gfx-section', class: 'gfx-section' }, el('legend', {}, tx('graphics')),
           gfxRows,
-          el('label', { class: 'slider-row' }, 'Theme', this.setTheme),
-          el('label', { class: 'slider-row' }, 'Camera', this.setCamera)),
-        el('fieldset', {}, el('legend', {}, 'Accessibility'),
+          el('label', { class: 'slider-row' }, tx('theme'), this.setTheme),
+          el('label', { class: 'slider-row' }, tx('camera'), this.setCamera)),
+        el('fieldset', {}, el('legend', {}, tx('accessibility')),
           this.togReduced.row, this.togContrast.row, this.togLargerText.row, this.togLefty.row,
           this.togConfirm.row, this.togTiming.row, this.togHaptics.row,
-          el('label', { class: 'slider-row' }, 'Color palette', this.setPalette)),
-        el('fieldset', {}, el('legend', {}, 'Keyboard bindings'), this.bindingsEditor),
-        el('fieldset', {}, el('legend', {}, 'Privacy'),
-          el('p', { class: 'help-note' }, 'This build sends no analytics or telemetry from the client.'),
-          el('button', { class: 'ghost-btn', onclick: () => this.resetProgress() }, 'Reset all local progress')),
+          el('label', { class: 'slider-row' }, tx('colorPalette'), this.setPalette)),
+        el('fieldset', {}, el('legend', {}, tx('keyBindings')), this.bindingsEditor),
+        el('fieldset', {}, el('legend', {}, tx('privacy')),
+          el('p', { class: 'help-note' }, tx('privacyNote')),
+          el('button', { class: 'ghost-btn', onclick: () => this.resetProgress() }, tx('resetProgress'))),
       ),
     );
     this.screens.append(this.screenSettings);
@@ -466,37 +503,38 @@ export class UI {
   // Graphics section: quality preset, render scale, per-effect overrides,
   // adaptive resolution, frame-rate readout and a live cost summary.
   _buildGraphicsControls() {
-    const t = gfxStrings(navigator.language);
-    this._gt = t;
+    // Graphics strings follow the game language (gfx-i18n.js); labels are live text.
+    const G = () => gfxStrings(locale());
+    const g = (key) => txf(() => G()(key));
     this.gfxPreset = el('select', { id: 'gfx-preset', 'data-gfx': 'preset', onchange: (e) => this.setGraphicsPreset(e.target.value) },
-      el('option', { value: 'auto' }, t('auto', { tier: '…' })),
-      PRESETS.map((p) => el('option', { value: p }, t(`presets.${p}`))));
+      el('option', { value: 'auto' }, G()('auto', { tier: '…' })),
+      PRESETS.map((p) => el('option', { value: p }, g(`presets.${p}`))));
     this.gfxScaleValue = el('output', { id: 'gfx-scale-value', class: 'gfx-value' }, '100%');
     this.gfxScale = el('input', {
       id: 'gfx-scale', 'data-gfx': 'render_scale', type: 'range', min: 50, max: 200, step: 5, value: 100,
-      'aria-label': t('renderScale'),
+      'aria-label': { live: () => G()('renderScale') },
       oninput: (e) => this.updateGraphics({ render_scale: parseInt(e.target.value, 10) / 100 }),
     });
     this.gfxCats = {};
     const catRows = Object.entries(CATEGORIES).map(([cat, tiers]) => {
       const sel = el('select', { id: `gfx-${cat}`, 'data-gfx-cat': cat, onchange: (e) => this.updateGraphics({ [cat]: e.target.value }) },
-        el('option', { value: 'preset' }, t('fromPreset', { tier: '…' })),
-        tiers.map((tier) => el('option', { value: tier }, t(`tiers.${tier}`))));
+        el('option', { value: 'preset' }, G()('fromPreset', { tier: '…' })),
+        tiers.map((tier) => el('option', { value: tier }, g(`tiers.${tier}`))));
       this.gfxCats[cat] = sel;
-      return el('label', { class: 'slider-row' }, t(`cats.${cat}`), sel);
+      return el('label', { class: 'slider-row' }, g(`cats.${cat}`), sel);
     });
     this.gfxAdaptive = el('input', { id: 'gfx-adaptive', type: 'checkbox', onchange: (e) => this.updateGraphics({ adaptive: e.target.checked }) });
     this.gfxFps = el('input', { id: 'gfx-fps', type: 'checkbox', onchange: (e) => this.updateGraphics({ show_fps: e.target.checked }) });
     this.gfxSummary = el('p', { id: 'gfx-summary', class: 'help-note gfx-summary', role: 'status' });
-    this.gfxPostNote = el('p', { id: 'gfx-post-note', class: 'help-note gfx-note', hidden: true }, t('postFailed'));
+    this.gfxPostNote = el('p', { id: 'gfx-post-note', class: 'help-note gfx-note', hidden: true }, g('postFailed'));
     // Live summary (fps, adaptive pixels) while the settings screen is open.
     setInterval(() => { if (this.screenSettings && !this.screenSettings.hidden) this._refreshGraphicsInfo(); }, 1000);
     return [
-      el('label', { class: 'slider-row' }, t('quality'), this.gfxPreset),
-      el('label', { class: 'slider-row' }, el('span', { class: 'gfx-scale-label' }, t('renderScale'), this.gfxScaleValue), this.gfxScale),
+      el('label', { class: 'slider-row' }, g('quality'), this.gfxPreset),
+      el('label', { class: 'slider-row' }, el('span', { class: 'gfx-scale-label' }, g('renderScale'), this.gfxScaleValue), this.gfxScale),
       el('div', { class: 'gfx-cats' }, catRows),
-      el('label', { class: 'toggle-row' }, this.gfxAdaptive, el('span', {}, t('adaptive'))),
-      el('label', { class: 'toggle-row' }, this.gfxFps, el('span', {}, t('showFps'))),
+      el('label', { class: 'toggle-row' }, this.gfxAdaptive, el('span', {}, g('adaptive'))),
+      el('label', { class: 'toggle-row' }, this.gfxFps, el('span', {}, g('showFps'))),
       this.gfxSummary,
       this.gfxPostNote,
     ];
@@ -519,20 +557,22 @@ export class UI {
     this.applySettings(this.settings);
   }
 
+  _relabelGraphics() { this._refreshGraphicsInfo(); }
+
   _refreshGraphicsInfo() {
-    const t = this._gt;
+    const gt = gfxStrings(locale());
     const g = this.settings.graphics;
-    const info = this.renderer?.graphicsInfo?.();
+    const info = this.renderer?.graphicsInfo?.(gfxWords(locale()));
     const detected = info?.detected || 'balanced';
     const resolved = info?.resolved;
-    this.gfxPreset.options[0].textContent = t('auto', { tier: t(`presets.${detected}`) });
+    this.gfxPreset.options[0].textContent = gt('auto', { tier: gt(`presets.${detected}`) });
     this.gfxPreset.value = PRESETS.includes(g.preset) ? g.preset : 'auto';
     const pct = Math.round((g.render_scale ?? 1) * 100);
     this.gfxScale.value = String(pct);
     this.gfxScaleValue.textContent = `${pct}%`;
     const preset = resolved?.preset || detected;
     for (const [cat, sel] of Object.entries(this.gfxCats)) {
-      sel.options[0].textContent = t('fromPreset', { tier: t(`tiers.${presetTier(preset, cat)}`) });
+      sel.options[0].textContent = gt('fromPreset', { tier: gt(`tiers.${presetTier(preset, cat)}`) });
       sel.value = CATEGORIES[cat].includes(g[cat]) ? g[cat] : 'preset';
     }
     this.gfxAdaptive.checked = g.adaptive !== false;
@@ -543,28 +583,26 @@ export class UI {
 
   _buildProfileScreen() {
     this.profileStats = el('div', { class: 'profile-stats' });
-    this.identityNameEl = el('strong', { class: 'profile-name' }, this.platform.displayName() || 'Player');
+    this.identityNameEl = el('strong', { class: 'profile-name' }, playerName(this.platform.displayName()) || t('player'));
     this.screenProfile = el('section', { class: 'screen', id: 'screen-profile', hidden: true, 'aria-labelledby': 'prof-h' },
-      this._screenHeader('Profile', 'Progress, identity and settings.'),
+      this._screenHeader('profileTitle', 'profileTitleSub'),
       el('div', { class: 'profile-grid' },
         el('div', { class: 'card' },
-          el('h3', {}, 'Identity'),
+          el('h3', {}, tx('identity')),
           this.platform.hosted
             ? el('div', {},
                 this.identityNameEl,
-                el('p', { class: 'help-note' }, 'Signed in through StarHermit — progression syncs to this account.'))
-            : el('p', { class: 'help-note' }, 'Playing as a guest. Progress is stored on this device only.')),
-        el('div', { class: 'card' }, el('h3', {}, 'Statistics'), this.profileStats),
+                el('p', { class: 'help-note' }, tx('signedInNote')))
+            : el('p', { class: 'help-note' }, tx('guestNote'))),
+        el('div', { class: 'card' }, el('h3', {}, tx('statistics')), this.profileStats),
         el('div', { class: 'card' },
-          el('h3', {}, 'Friends & Social'),
-          el('p', { class: 'help-note' }, this.platform.hosted
-            ? 'Friends, invitations and chat live in the StarHermit host shell.'
-            : 'Friends, invitations and chat require the StarHermit host. Offline, your social layer stays private.')),
+          el('h3', {}, tx('friends')),
+          el('p', { class: 'help-note' }, tx(this.platform.hosted ? 'friendsHosted' : 'friendsOffline'))),
         el('div', { class: 'card' },
-          el('h3', {}, 'Shortcuts'),
-          el('button', { class: 'ghost-btn', onclick: () => this.showScreen('achievements') }, 'Achievements'),
-          el('button', { class: 'ghost-btn', onclick: () => this.showScreen('settings') }, 'Settings'),
-          el('button', { class: 'ghost-btn', onclick: () => this.showScreen('help') }, 'How to play')),
+          el('h3', {}, tx('shortcuts')),
+          el('button', { class: 'ghost-btn', id: 'btn-profile-achievements', onclick: () => this.showScreen('achievements') }, tx('achievements')),
+          el('button', { class: 'ghost-btn', id: 'btn-profile-settings', onclick: () => this.showScreen('settings') }, tx('settings')),
+          el('button', { class: 'ghost-btn', id: 'btn-profile-help', onclick: () => this.showScreen('help') }, tx('howToPlayShort'))),
       ),
     );
     this.screens.append(this.screenProfile);
@@ -574,12 +612,12 @@ export class UI {
     const prog = this.store.loadProgression();
     const st = prog.stats;
     const rows = [
-      ['Rounds played', st.roundsPlayed],
-      ['Rounds won', st.roundsWon],
-      ['Draws', st.roundsDrawn],
-      ['Total score', st.totalScore],
-      ['Achievements', `${Object.keys(prog.achievements).length}/${ACHIEVEMENTS.length}`],
-      ['Lessons done', `${Object.keys(prog.lessons).length}/${LESSONS.length}`],
+      [t('statRounds'), st.roundsPlayed],
+      [t('statWon'), st.roundsWon],
+      [t('statDraws'), st.roundsDrawn],
+      [t('statScore'), st.totalScore],
+      [t('statAchievements'), `${Object.keys(prog.achievements).length}/${ACHIEVEMENTS.length}`],
+      [t('statLessons'), `${Object.keys(prog.lessons).length}/${LESSONS.length}`],
     ];
     this.profileStats.innerHTML = '';
     for (const [k, v] of rows) {
@@ -590,46 +628,47 @@ export class UI {
   async copyInvite() {
     const url = this.platform.inviteLink();
     if (!url) return;
-    try { await navigator.clipboard.writeText(url); this.toast(shText('copied')); }
-    catch { this.toast(shText('copyFail', { url })); }
+    try { await navigator.clipboard.writeText(url); this.toast(sh('copied')); }
+    catch { this.toast(sh('copyFail', { url })); }
   }
 
   // Account name (hosted) in the title and HUD slots; nothing to show offline.
   _refreshIdentity() {
     if (this.signInBtn) this.signInBtn.hidden = !this.platform.canSignIn();
     if (this.inviteBtn) this.inviteBtn.hidden = !this.platform.inviteLink();
-    const name = this.platform.displayName();
-    if (this.titleNameEl) this.titleNameEl.textContent = name ? `Playing as ${name}` : '';
+    const name = playerName(this.platform.displayName());
+    if (this.titleNameEl) this.titleNameEl.textContent = name ? t('playingAs', { name }) : '';
     if (this.hudNameEl) {
       this.hudNameEl.textContent = name || '';
       this.hudNameEl.hidden = !name;
     }
-    if (this.identityNameEl) this.identityNameEl.textContent = name || 'Player';
+    if (this.identityNameEl) this.identityNameEl.textContent = name || t('player');
   }
 
   // Small cloud-sync indicator next to the clock: synced / saving / offline.
   updateSyncStatus(state) {
+    this._syncState = state;
     if (!this.syncEl) return;
-    const label = state === 'synced' ? 'Synced' : state === 'saving' ? 'Saving…' : this.platform.hosted ? 'Offline' : 'Local';
+    const label = t(state === 'synced' ? 'syncSynced' : state === 'saving' ? 'syncSaving' : this.platform.hosted ? 'syncOffline' : 'syncLocal');
     this.syncEl.textContent = label;
     this.syncEl.dataset.state = state;
   }
 
   _buildHostedScreen() {
     this.screenHosted = el('section', { class: 'screen', id: 'screen-hosted', hidden: true, 'aria-labelledby': 'host-h' },
-      this._screenHeader('Hosted Play', 'Head-to-head matches with authoritative results.'),
+      this._screenHeader('hostedTitle', 'hostedSub'),
       el('div', { class: 'card' },
-        el('p', {}, 'Head-to-head hosted matches are not available in this build.'),
-        el('p', { class: 'help-note' }, 'Learn, Journey, Daily, Practice and Challenge are fully playable, and your progression syncs to your account when hosted.')),
+        el('p', {}, tx('hostedUnavailable')),
+        el('p', { class: 'help-note' }, tx('hostedNote'))),
     );
     this.screens.append(this.screenHosted);
   }
 
   _screenHeader(title, sub) {
     return el('header', { class: 'screen-header' },
-      el('button', { class: 'back-btn', onclick: () => this.goBack(), 'aria-label': 'Back' }, '←'),
-      el('div', {}, el('h2', {}, title), el('p', { class: 'screen-sub' }, sub)),
-      el('button', { class: 'icon-btn', 'aria-label': 'Settings', onclick: () => this.showScreen('settings') }, '⚙'),
+      el('button', { class: 'back-btn', onclick: () => this.goBack(), 'aria-label': lv('back') }, '←'),
+      el('div', {}, el('h2', {}, tx(title)), el('p', { class: 'screen-sub' }, tx(sub))),
+      el('button', { class: 'icon-btn', 'aria-label': lv('settings'), onclick: () => this.showScreen('settings') }, '⚙'),
     );
   }
 
@@ -711,63 +750,91 @@ export class UI {
         assists: m.assists, par: m.par, goals: m.goals,
       };
       this.enterPlayfield();
-      this.openPauseModal('Match restored where you left it.');
+      this.openPauseModal('matchRestored');
     }
   }
 
   // ================= match setup sheets =================
 
-  _setupSheet({ title, rows, onStart, startLabel = 'Start' }) {
-    const sheet = el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-      el('h3', {}, title),
-      el('dl', { class: 'mode-facts' }, rows.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v)))),
-      el('div', { class: 'sheet-actions' },
-        el('button', { class: 'primary-btn', onclick: () => { this.closeModal(); onStart(); } }, startLabel),
-        el('button', { class: 'ghost-btn', onclick: () => this.closeModal() }, 'Cancel')),
-    );
-    this.openModal(sheet);
+  /** spec() → { title, rows, onStart }; re-run on a language change while open. */
+  _setupSheet(spec) {
+    const build = () => {
+      const { title, rows, onStart } = spec();
+      return el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+        el('h3', {}, title),
+        el('dl', { class: 'mode-facts' }, rows.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v)))),
+        el('div', { class: 'sheet-actions' },
+          el('button', { class: 'primary-btn', 'data-act': 'start', onclick: () => { this.closeModal(); onStart(); } }, t('start')),
+          el('button', { class: 'ghost-btn', 'data-act': 'cancel', onclick: () => this.closeModal() }, t('cancel'))),
+      );
+    };
+    this.openModal(build(), { render: build });
   }
 
   _rulesSummary(config) {
-    const parts = [`${config.boardSize}×${config.boardSize} board`, `line of ${config.winLength} wins`];
-    if (config.disabledCells.length) parts.push(`${config.disabledCells.length} sealed cell${config.disabledCells.length > 1 ? 's' : ''}`);
-    if (config.moveLimit) parts.push(`${config.moveLimit} marks each`);
-    if (config.timeLimitMs) parts.push(`${fmtTime(config.timeLimitMs)} clock each`);
-    if (config.misere) parts.push('misère: lines lose');
-    if (config.startMarks.length) parts.push(`${config.startMarks.length} opening mark${config.startMarks.length > 1 ? 's' : ''}`);
+    const parts = [t('rsBoard', { n: config.boardSize }), t('rsLine', { n: config.winLength })];
+    if (config.disabledCells.length) parts.push(t(config.disabledCells.length > 1 ? 'rsSealedMany' : 'rsSealedOne', { n: config.disabledCells.length }));
+    if (config.moveLimit) parts.push(t('rsMoveLimit', { n: config.moveLimit }));
+    if (config.timeLimitMs) parts.push(t('rsClock', { time: fmtTime(config.timeLimitMs) }));
+    if (config.misere) parts.push(t('rsMisere'));
+    if (config.startMarks.length) parts.push(t(config.startMarks.length > 1 ? 'rsOpeningMany' : 'rsOpeningOne', { n: config.startMarks.length }));
     return parts.join(' · ');
   }
 
   openStageSheet(stage) {
     const prog = this.store.loadProgression();
     const rec = prog.journey[stage.id];
-    this._setupSheet({
-      title: `Stage ${stage.index} — ${stage.name}`,
+    this._setupSheet(() => ({
+      title: t('stageTitle', { n: stage.index, name: stageName(stage) }),
       rows: [
-        ['Rules', this._rulesSummary(stage.config)],
-        ['Opponent', `${stage.opponent.name} (${stage.opponent.difficulty})`],
-        ['Series', stage.series > 1 ? `Best of ${stage.series}` : 'Single round'],
-        ['Duration', stage.par.timeMs >= 240000 ? '~5 min' : '~2 min'],
-        ['Ranked', this.platform.hosted ? 'Platform leaderboard (unassisted)' : 'No (progression)'],
-        ['Par', `${stage.par.marks} marks · ${fmtTime(stage.par.timeMs)}`],
-        ['Best', rec ? `${rec.stars}★ · ${rec.bestScore} pts` : '—'],
+        [t('rules'), this._rulesSummary(stage.config)],
+        [t('opponent'), t('opponentValue', { name: stage.opponent.name === 'Rival' ? t('rival') : stage.opponent.name, difficulty: aiName(stage.opponent.difficulty) })],
+        [t('series'), stage.series > 1 ? t('bestOf', { n: stage.series }) : t('singleRound')],
+        [t('duration'), stage.par.timeMs >= 240000 ? t('dur5') : t('dur2')],
+        [t('ranked'), this.platform.hosted ? t('rankedLb') : t('noProgression')],
+        [t('par'), t('parValue', { marks: stage.par.marks, time: fmtTime(stage.par.timeMs) })],
+        [t('best'), rec ? t('bestValue', { stars: rec.stars, score: rec.bestScore }) : '—'],
       ],
       onStart: () => this.startStage(stage),
-    });
+    }));
   }
 
   openChallengeSheet(c) {
-    this._setupSheet({
-      title: c.name,
+    this._setupSheet(() => ({
+      title: challengeText(c, 0, c.name),
       rows: [
-        ['Goal', c.goalText],
-        ['Rules', this._rulesSummary(c.config)],
-        ['Opponent', c.ai],
-        ['Seed', String(c.seed)],
-        ['Ranked', this.platform.hosted ? 'Platform leaderboard (unassisted)' : 'No'],
+        [t('goal'), challengeText(c, 2, c.goalText)],
+        [t('rules'), this._rulesSummary(c.config)],
+        [t('opponent'), aiName(c.ai)],
+        [t('seed'), String(c.seed)],
+        [t('ranked'), this.platform.hosted ? t('rankedLb') : t('no')],
       ],
       onStart: () => this.startChallenge(c),
-    });
+    }));
+  }
+
+  /** Display name of the running match's content, in the current language. */
+  contentLabel(m) {
+    if (!m) return '';
+    if (m.mode === 'journey') {
+      const st = JOURNEY_STAGES.find((x) => x.id === m.contentId);
+      if (st) return t('stageTitle', { n: st.index, name: stageName(st) });
+    }
+    if (m.mode === 'challenge') {
+      const c = CHALLENGES.find((x) => x.id === m.contentId);
+      if (c) return challengeText(c, 0, c.name);
+    }
+    if (m.mode === 'daily') {
+      const r = /^Daily — (.+)$/.exec(m.contentName || '');
+      if (r) return t('dailyTitle', { name: rulesetName(r[1]) });
+    }
+    if (m.mode === 'learn') {
+      const l = LESSONS.find((x) => x.id === m.contentId);
+      if (l) return lessonText(l, 'name', l.name);
+    }
+    if (m.mode === 'practice') return t('practice');
+    if (m.contentName === 'Friendly Round') return t('friendlyRound');
+    return m.contentName || '';
   }
 
   // ================= match start =================
@@ -797,14 +864,14 @@ export class UI {
     const daily = dailyFor(new Date(this.platform.serverNow()));
     // One ranked attempt per day; replays of a completed daily are unranked.
     const done = !!this.store.loadProgression().dailies[daily.id];
-    this._setupSheet({
-      title: daily.name,
+    this._setupSheet(() => ({
+      title: t('dailyTitle', { name: rulesetName(daily.rulesetName) }),
       rows: [
-        ['Date (UTC)', daily.date],
-        ['Rules', this._rulesSummary(daily.config)],
-        ['Opponent', daily.ai],
-        ['Seed', String(daily.seed)],
-        ['Ranked', this.settings.accessibility.timingAssist ? 'No (timing assist on)' : done ? 'No (already played today)' : 'Yes — fair daily board'],
+        [t('dateUtc'), daily.date],
+        [t('rules'), this._rulesSummary(daily.config)],
+        [t('opponent'), aiName(daily.ai)],
+        [t('seed'), String(daily.seed)],
+        [t('ranked'), this.settings.accessibility.timingAssist ? t('noTiming') : done ? t('noAlready') : t('yesFair')],
       ],
       onStart: () => {
         this.lastMatchOptions = {
@@ -815,7 +882,7 @@ export class UI {
         };
         this._launch(this.lastMatchOptions);
       },
-    });
+    }));
   }
 
   startPractice() {
@@ -837,7 +904,7 @@ export class UI {
   startLesson(lesson) {
     this.session.startLesson(lesson);
     this.enterPlayfield();
-    this.announce(`Lesson: ${lesson.name}. ${lesson.intro}`);
+    this.announce(t('lessonAnnounce', { name: lessonText(lesson, 'name', lesson.name), intro: lessonText(lesson, 'intro', lesson.intro) }));
   }
 
   _launch(options) {
@@ -949,14 +1016,14 @@ export class UI {
     const n = state.config.boardSize;
     const humanTurn = state.status === 'active' && state.currentPlayer === this.session.match?.humanPlayer;
     const legal = new Set(humanTurn ? legalCells(state, state.currentPlayer) : []);
-    const names = { 0: 'empty', 1: 'X mark', 2: 'O mark' };
+    const names = { 0: t('cellEmpty'), 1: t('cellX'), 2: t('cellO') };
     for (let i = 0; i < this.cellButtons.length; i++) {
       const btn = this.cellButtons[i];
       const r = Math.floor(i / n) + 1;
       const c = (i % n) + 1;
       const v = state.board[i];
       const disabledCell = state.config.disabledCells.includes(i);
-      btn.setAttribute('aria-label', `Row ${r}, column ${c}: ${disabledCell ? 'sealed' : names[v]}${legal.has(i) ? ', available' : ''}`);
+      btn.setAttribute('aria-label', t('cellLabel', { r, c, what: disabledCell ? t('cellSealed') : names[v], avail: legal.has(i) ? t('cellAvailable') : '' }));
       // aria-disabled (not the disabled attribute): buttons stay focusable and
       // their taps route through tapCell, which explains why a move is illegal
       // instead of silently swallowing the input.
@@ -979,14 +1046,14 @@ export class UI {
     if (s.phase === PHASE.TUTORIAL) {
       const res = s.lessonPlace(cell);
       if (!res.ok && res.reason === 'wrong-cell') {
-        this.toast('Not there — follow the lesson goal.', 'warn');
+        this.toast(t('notThere'), 'warn');
         this.audio.invalid();
       }
       return;
     }
     if (s.phase !== PHASE.ACTIVE || !s.state || s.state.status !== 'active') return;
     if (s.state.currentPlayer !== s.match.humanPlayer) {
-      this.toast('Wait for your turn.', 'warn');
+      this.toast(t('waitTurn'), 'warn');
       return;
     }
     if (this.settings.accessibility.confirmMoves && this.pendingConfirmCell !== cell) {
@@ -994,7 +1061,7 @@ export class UI {
       if (!legal.includes(cell)) return this._explainIllegal(cell);
       this.pendingConfirmCell = cell;
       this.renderer.setSelection(cell);
-      this.announce(`Selected row ${Math.floor(cell / s.state.config.boardSize) + 1}, column ${(cell % s.state.config.boardSize) + 1}. Press again to place.`);
+      this.announce(t('selectedCell', { r: Math.floor(cell / s.state.config.boardSize) + 1, c: (cell % s.state.config.boardSize) + 1 }));
       return;
     }
     this.pendingConfirmCell = null;
@@ -1005,12 +1072,12 @@ export class UI {
   _explainIllegal(cell, reason) {
     const s = this.session.state;
     const n = s.config.boardSize;
-    const at = `row ${Math.floor(cell / n) + 1}, column ${(cell % n) + 1}`;
+    const at = t('cellAt', { r: Math.floor(cell / n) + 1, c: (cell % n) + 1 });
     let msg;
-    if (reason === 'cell-occupied' || s.board[cell] !== 0) msg = `That cell at ${at} already holds a mark.`;
-    else if (s.config.disabledCells.includes(cell)) msg = `The cell at ${at} is sealed in this ruleset.`;
-    else if (reason === 'game-over') msg = 'The round is over.';
-    else msg = reason || 'That move is not legal.';
+    if (reason === 'cell-occupied' || s.board[cell] !== 0) msg = t('occupied', { at });
+    else if (s.config.disabledCells.includes(cell)) msg = t('sealedCell', { at });
+    else if (reason === 'game-over') msg = t('roundOverMsg');
+    else msg = t('notLegal');
     this.toast(msg, 'warn');
     this.announceAssertive(msg);
     this.audio.invalid();
@@ -1034,7 +1101,7 @@ export class UI {
     // Gamepad: standard mapping, polled while a match is active.
     window.addEventListener('gamepadconnected', (e) => {
       this._gamepad.index = e.gamepad.index;
-      this.toast('Gamepad connected.');
+      this.toast(t('gamepadConnected'));
       this._pollGamepad();
     });
     window.addEventListener('gamepaddisconnected', () => {
@@ -1179,17 +1246,17 @@ export class UI {
       // Human-originated invalids are already explained at the tap site.
     });
     s.on('move', ({ cmd }) => {
-      if (cmd.player !== s.match?.humanPlayer) this.announce(`Rival placed at row ${Math.floor(cmd.cell / s.state.config.boardSize) + 1}, column ${(cmd.cell % s.state.config.boardSize) + 1}.`);
+      if (cmd.player !== s.match?.humanPlayer) this.announce(t('rivalPlaced', { r: Math.floor(cmd.cell / s.state.config.boardSize) + 1, c: (cmd.cell % s.state.config.boardSize) + 1 }));
       this._layoutCellOverlay();
     });
     s.on('round-start', () => {
       this.pendingConfirmCell = null;
       this._buildCellOverlay();
       this._updateHudChrome();
-      this.announce(`Round ${s.match.roundIndex} begins.`);
+      this.announce(t('roundBegins', { n: s.match.roundIndex }));
     });
     s.on('round-end', (r) => {
-      const msg = r.draw ? 'Round drawn.' : r.humanWon ? 'You take the round!' : 'Rival takes the round.';
+      const msg = t(r.draw ? 'roundDrawn' : r.humanWon ? 'youTakeRound' : 'rivalTakesRound');
       this.announce(msg);
       if (this.audio) this.audio.setMusicIntensity(0.4);
     });
@@ -1203,10 +1270,11 @@ export class UI {
     s.on('lesson-step', (info) => {
       this.renderer.setLessonHighlights(info.highlightCells);
       this._updateHudChrome();
-      this.announce(info.step.text);
+      this.announce(this._lessonStepText(info));
       this._updateCellLabels();
     });
     s.on('lesson-failed-step', ({ text }) => {
+      text = { 'That did not meet the goal. The step resets — try again.': t('lessonFailedGoal'), 'The rival got there first. The step resets — try again.': t('lessonFailedRival') }[text] || text;
       this.toast(text, 'warn');
       this.announceAssertive(text);
     });
@@ -1214,7 +1282,7 @@ export class UI {
       this.openLessonResults(lesson, achievementsUnlocked);
     });
     s.on('undo', () => {
-      this.announce('Undone. Your turn again.');
+      this.announce(t('undoneTurn'));
       this.renderer.skipAnimations();
     });
     s.on('phase', ({ phase }) => {
@@ -1224,28 +1292,32 @@ export class UI {
 
   // ================= HUD =================
 
+  _lessonStepText(info) {
+    return lessonText({ id: this.session.lesson?.id }, 'steps', null)?.[info.stepIndex] || info.step.text;
+  }
+
   _updateHudChrome() {
     const m = this.session.match;
     if (!m) return;
     this.railLeft.innerHTML = '';
     const lessonInfo = this.session.lesson ? this.session.lessonStepInfo() : null;
     this.railLeft.append(
-      el('h3', { class: 'rail-title' }, m.mode === 'learn' ? 'Lesson' : 'Match'),
-      el('div', { class: 'rail-block' }, el('strong', {}, m.contentName)),
+      el('h3', { class: 'rail-title' }, t(m.mode === 'learn' ? 'lesson' : 'match')),
+      el('div', { class: 'rail-block' }, el('strong', {}, this.contentLabel(m))),
       el('div', { class: 'rail-block' },
         el('span', {}, m.mode === 'learn'
-          ? `Step ${lessonInfo.stepIndex + 1} of ${lessonInfo.totalSteps}`
+          ? t('stepOf', { n: lessonInfo.stepIndex + 1, total: lessonInfo.totalSteps })
           : m.seriesLength > 1
-            ? `Round ${m.roundIndex} of ${m.seriesLength} · You ${m.seriesScore[m.humanPlayer]} – ${m.seriesScore[m.humanPlayer === 1 ? 2 : 1]} Rival`
-            : `Round ${m.roundIndex}`)),
+            ? t('roundOfSeries', { n: m.roundIndex, total: m.seriesLength, you: m.seriesScore[m.humanPlayer], rival: m.seriesScore[m.humanPlayer === 1 ? 2 : 1] })
+            : t('roundN', { n: m.roundIndex }))),
       el('div', { class: 'rail-block' }, el('small', {}, this._rulesSummary(this.session.state.config))),
-      el('div', { class: 'rail-block' }, el('small', {}, `Seed ${this.session.state.seed}`)),
+      el('div', { class: 'rail-block' }, el('small', {}, t('seedN', { n: this.session.state.seed }))),
     );
     this.objectiveEl.textContent = m.mode === 'learn'
-      ? lessonInfo.step.text
+      ? this._lessonStepText(lessonInfo)
       : m.config.misere
-        ? 'Objective: force the rival to complete a line.'
-        : `Objective: complete a line of ${m.config.winLength}.`;
+        ? t('objMisere')
+        : t('objLine', { n: m.config.winLength });
     this._updateHud();
   }
 
@@ -1255,11 +1327,11 @@ export class UI {
     if (!state || !s.match) return;
     const human = state.currentPlayer === s.match.humanPlayer;
     if (s.phase === PHASE.TUTORIAL) {
-      this.turnBanner.textContent = human ? 'Your move' : 'Watch…';
+      this.turnBanner.textContent = t(human ? 'yourMove' : 'watch');
     } else {
-      this.turnBanner.textContent = state.status === 'terminal'
-        ? 'Round over'
-        : human ? 'Your move' : 'Rival thinking…';
+      this.turnBanner.textContent = t(state.status === 'terminal'
+        ? 'roundOver'
+        : human ? 'yourMove' : 'rivalThinking');
     }
     this.turnBanner.classList.toggle('yours', human && state.status === 'active');
     this.btnUndo.disabled = !s.canUndo();
@@ -1292,7 +1364,7 @@ export class UI {
         used = limit - this._lastClock.remainingMs;
       }
       const remain = Math.max(0, limit - used);
-      parts.push(`${p === human ? 'You' : 'Rival'} ${fmtTime(remain)}`);
+      parts.push(t(p === human ? 'clockYou' : 'clockRival', { time: fmtTime(remain) }));
     }
     this.clockEl.textContent = parts.join(' · ');
   }
@@ -1307,7 +1379,7 @@ export class UI {
 
   doUndo() {
     const res = this.session.undo();
-    if (!res.ok) this.toast('Undo is not available here.', 'warn');
+    if (!res.ok) this.toast(t('undoUnavailable'), 'warn');
   }
 
   doHint() {
@@ -1320,8 +1392,8 @@ export class UI {
     this.renderer.setLessonHighlights([cell]);
     setTimeout(() => this.renderer.setLessonHighlights(this.session.lesson ? this.session.lessonStepInfo().highlightCells : []), 1800);
     const n = s.state.config.boardSize;
-    this.toast(`Hint: consider row ${Math.floor(cell / n) + 1}, column ${(cell % n) + 1}.`);
-    this.announce(`Hint suggests row ${Math.floor(cell / n) + 1}, column ${(cell % n) + 1}.`);
+    this.toast(t('hintToast', { r: Math.floor(cell / n) + 1, c: (cell % n) + 1 }));
+    this.announce(t('hintAnnounce', { r: Math.floor(cell / n) + 1, c: (cell % n) + 1 }));
     this.audio.focus();
   }
 
@@ -1330,15 +1402,23 @@ export class UI {
     const cur = this.settings.camera.angle;
     const next = order[(order.indexOf(cur) + 1) % order.length];
     this.updateSetting('camera.angle', next);
-    this.toast(`Camera: ${next}`);
+    this.toast(t('cameraToast', { angle: t(CAMERA_KEYS[next]) }));
   }
 
   // ================= modals =================
 
-  openModal(node, { locked = false } = {}) {
+  openModal(node, { locked = false, render = null } = {}) {
     this.previousFocus = document.activeElement;
     this.modalRoot.innerHTML = '';
     this.modal = node;
+    // render() rebuilds this sheet in the current language (relabel()).
+    this._modalRender = render ? () => {
+      const next = render();
+      next.dataset.locked = node.dataset.locked;
+      this.modal.replaceWith(next);
+      this.modal = next;
+      node = next;
+    } : null;
     node.dataset.locked = locked ? 'true' : 'false';
     this.modalRoot.append(node);
     this.modalRoot.hidden = false;
@@ -1365,119 +1445,127 @@ export class UI {
     this.modalRoot.hidden = true;
     this.modalRoot.innerHTML = '';
     this.modal = null;
+    this._modalRender = null;
     if (this.previousFocus && this.previousFocus.focus) this.previousFocus.focus({ preventScroll: true });
   }
 
-  openPauseModal(note) {
+  /** noteKey: a strings.js key (or plain text) shown under the heading. */
+  openPauseModal(noteKey) {
     const s = this.session;
-    const body = el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Paused' },
-      el('h3', {}, 'Paused'),
-      note ? el('p', {}, note) : null,
+    const build = () => el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('paused') },
+      el('h3', {}, t('paused')),
+      noteKey ? el('p', {}, t(noteKey)) : null,
       el('div', { class: 'sheet-actions col' },
-        el('button', { class: 'primary-btn', onclick: () => { this.closeModal(); s.resume(); } }, 'Resume'),
-        el('button', { class: 'ghost-btn', onclick: () => { this.closeModal(); this._returnToPause = true; this.hud.hidden = true; this.showScreen('settings'); } }, 'Settings'),
-        el('button', { class: 'ghost-btn', onclick: () => { this.closeModal(); this._returnToPause = true; this.hud.hidden = true; this.showScreen('help'); } }, 'How to play'),
-        el('button', { class: 'danger-btn', onclick: () => { this.closeModal(); this.leaveMatch(); } }, 'Leave match')),
+        el('button', { class: 'primary-btn', 'data-act': 'resume', onclick: () => { this.closeModal(); s.resume(); } }, t('resume')),
+        el('button', { class: 'ghost-btn', 'data-act': 'settings', onclick: () => { this.closeModal(); this._returnToPause = true; this.hud.hidden = true; this.showScreen('settings'); } }, t('settings')),
+        el('button', { class: 'ghost-btn', 'data-act': 'help', onclick: () => { this.closeModal(); this._returnToPause = true; this.hud.hidden = true; this.showScreen('help'); } }, t('howToPlayShort')),
+        el('button', { class: 'danger-btn', 'data-act': 'leave', onclick: () => { this.closeModal(); this.leaveMatch(); } }, t('leaveMatch'))),
     );
-    this.openModal(body);
-    this.announce('Game paused.');
+    this.openModal(build(), { render: build });
+    this.announce(t('gamePaused'));
   }
 
   openResults(result) {
     const s = this.session;
     const won = result.outcome === 'win';
-    const headline = won ? 'Victory' : result.outcome === 'draw' ? 'An Honest Draw' : 'Defeat';
-    const rows = result.breakdown.components.map((c) =>
-      el('tr', {}, el('td', {}, c.label), el('td', { class: 'num' }, `${c.value >= 0 ? '+' : ''}${c.value}`)));
-
-    const actions = [];
-    actions.push(el('button', {
-      class: 'primary-btn',
-      onclick: () => {
-        this.closeModal();
-        // A daily replay is always unranked — match the button's promise.
-        const opts = result.mode === 'daily' && this.lastMatchOptions
-          ? { ...this.lastMatchOptions, ranked: false }
-          : this.lastMatchOptions;
-        this._launch(opts);
-      },
-    }, result.mode === 'daily' ? 'Play again (unranked)' : 'Retry'));
-    if (result.mode === 'journey' && won) {
-      const idx = JOURNEY_STAGES.findIndex((st) => st.id === result.contentId);
-      const next = JOURNEY_STAGES[idx + 1];
-      if (next) {
-        actions.push(el('button', { class: 'ghost-btn', onclick: () => { this.closeModal(); this.openStageSheet(next); } }, `Next: ${next.name}`));
-      }
-    }
-    actions.push(el('button', { class: 'ghost-btn', onclick: () => { this.closeModal(); this.leaveMatch(); } }, 'Back to modes'));
-
-    const achBadges = (result.achievementsUnlocked || []).map((key) => {
-      const a = ACHIEVEMENTS.find((x) => x.key === key);
-      return a ? el('div', { class: 'ach-badge' }, `🏅 ${a.name}`) : null;
-    });
-
+    const headlineKey = won ? 'victory' : result.outcome === 'draw' ? 'honestDraw' : 'defeat';
     // Signed in: unassisted Journey, Daily and Challenge matches post their
     // total to the platform high-score board; the line shows the rank.
     const posts = this.platform.hosted && ['journey', 'daily', 'challenge'].includes(result.mode) && !result.assistsUsed;
-    const lbLine = posts ? el('p', { class: 'results-sub', id: 'results-lb', role: 'status' }, shText('lbPosting')) : null;
-    const sheet = el('div', { class: 'sheet results', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Match results' },
-      el('h3', { class: won ? 'won' : result.outcome === 'draw' ? 'drew' : 'lost' }, headline),
-      el('p', { class: 'results-sub' },
-        `${result.contentName} · ${result.rounds.length} round${result.rounds.length > 1 ? 's' : ''}` +
-        (result.ranked ? ' · Ranked' : result.assistsUsed ? ' · Unranked (assists used)' : '')),
-      result.stars ? el('div', { class: 'stars big', 'aria-label': `${result.stars} of 3 stars` }, '★'.repeat(result.stars) + '☆'.repeat(3 - result.stars)) : null,
-      el('table', { class: 'breakdown' },
-        el('tbody', {}, rows),
-        el('tfoot', {}, el('tr', {}, el('td', {}, 'Total'), el('td', { class: 'num' }, String(result.breakdown.total))))),
-      result.rounds.length > 1
-        ? el('p', { class: 'results-sub' }, `Series: You ${result.seriesScore[s.match.humanPlayer]} – ${result.seriesScore[s.match.humanPlayer === 1 ? 2 : 1]} Rival`)
-        : null,
-      achBadges.length ? el('div', { class: 'ach-row' }, achBadges) : null,
-      el('p', { class: 'results-sub' }, this._nextRecommendation(result)),
-      lbLine,
-      el('div', { class: 'sheet-actions' }, actions),
-    );
-    this.openModal(sheet);
-    if (lbLine) {
+    let lbState = posts ? { key: 'lbPosting' } : null;
+    const human = s.match.humanPlayer;
+    const build = () => {
+      const rows = result.breakdown.components.map((c) =>
+        el('tr', {}, el('td', {}, scoreLabel(c.label)), el('td', { class: 'num' }, `${c.value >= 0 ? '+' : ''}${c.value}`)));
+      const actions = [];
+      actions.push(el('button', {
+        class: 'primary-btn',
+        'data-act': 'retry',
+        onclick: () => {
+          this.closeModal();
+          // A daily replay is always unranked — match the button's promise.
+          const opts = result.mode === 'daily' && this.lastMatchOptions
+            ? { ...this.lastMatchOptions, ranked: false }
+            : this.lastMatchOptions;
+          this._launch(opts);
+        },
+      }, t(result.mode === 'daily' ? 'playAgainUnranked' : 'retry')));
+      if (result.mode === 'journey' && won) {
+        const idx = JOURNEY_STAGES.findIndex((st) => st.id === result.contentId);
+        const next = JOURNEY_STAGES[idx + 1];
+        if (next) {
+          actions.push(el('button', { class: 'ghost-btn', 'data-act': 'next', onclick: () => { this.closeModal(); this.openStageSheet(next); } }, t('nextName', { name: stageName(next) })));
+        }
+      }
+      actions.push(el('button', { class: 'ghost-btn', 'data-act': 'modes', onclick: () => { this.closeModal(); this.leaveMatch(); } }, t('backToModes')));
+      const achBadges = (result.achievementsUnlocked || []).map((key) => {
+        const a = ACHIEVEMENTS.find((x) => x.key === key);
+        return a ? el('div', { class: 'ach-badge' }, `🏅 ${achievementText(a, 0)}`) : null;
+      });
+      const name = this.contentLabel(result);
+      return el('div', { class: 'sheet results', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('matchResults') },
+        el('h3', { class: won ? 'won' : result.outcome === 'draw' ? 'drew' : 'lost' }, t(headlineKey)),
+        el('p', { class: 'results-sub' },
+          t(result.rounds.length > 1 ? 'resultsSubMany' : 'resultsSubOne', { name, n: result.rounds.length }) +
+          (result.ranked ? t('rankedTag') : result.assistsUsed ? t('unrankedAssists') : '')),
+        result.stars ? el('div', { class: 'stars big', 'aria-label': t('starsOf3', { n: result.stars }) }, '★'.repeat(result.stars) + '☆'.repeat(3 - result.stars)) : null,
+        el('table', { class: 'breakdown' },
+          el('tbody', {}, rows),
+          el('tfoot', {}, el('tr', {}, el('td', {}, t('total')), el('td', { class: 'num' }, String(result.breakdown.total))))),
+        result.rounds.length > 1
+          ? el('p', { class: 'results-sub' }, t('seriesScore', { you: result.seriesScore[human], rival: result.seriesScore[human === 1 ? 2 : 1] }))
+          : null,
+        achBadges.length ? el('div', { class: 'ach-row' }, achBadges) : null,
+        el('p', { class: 'results-sub' }, this._nextRecommendation(result)),
+        lbState ? el('p', { class: 'results-sub', id: 'results-lb', role: 'status' }, sh(lbState.key, lbState.vars)) : null,
+        el('div', { class: 'sheet-actions' }, actions),
+      );
+    };
+    const sheet = build();
+    this.openModal(sheet, { render: build });
+    if (lbState) {
       this.platform.submitScore(result.breakdown.total).then((r) => {
-        lbLine.textContent = !r.posted ? shText('lbNotPosted')
-          : r.rank ? shText('lbRank', { rank: r.rank }) : shText('lbPosted');
+        lbState = !r.posted ? { key: 'lbNotPosted' } : r.rank ? { key: 'lbRank', vars: { rank: r.rank } } : { key: 'lbPosted' };
+        const line = this.modalRoot.querySelector('#results-lb');
+        if (line) line.textContent = sh(lbState.key, lbState.vars);
       });
     }
-    this.announce(`${headline}. Total score ${result.breakdown.total}.`);
+    this.announce(t('resultsAnnounce', { headline: t(headlineKey), total: result.breakdown.total }));
     if (this.audio) this.audio.setMusicIntensity(0.1);
   }
 
   _nextRecommendation(result) {
-    if (result.mode === 'journey') {
-      if (result.outcome !== 'win') return 'Tip: blocking matters more than building. Try the lesson “The Block”, then retry.';
-      return 'Progress saved. The next stage is unlocked.';
-    }
-    if (result.mode === 'daily') return 'Come back tomorrow for a fresh seed and ruleset.';
-    if (result.mode === 'learn') return 'Lessons can be replayed any time from Learn.';
-    if (result.mode === 'challenge') return result.outcome === 'win' ? 'Challenge cleared. Another one waits.' : 'Watch the rival’s threats one move earlier.';
-    return result.outcome === 'win' ? 'Try a harder difficulty or a wider board.' : 'Practice is unrated — use undo and hints freely.';
+    if (result.mode === 'journey') return t(result.outcome !== 'win' ? 'recJourneyLost' : 'recJourneyWon');
+    if (result.mode === 'daily') return t('recDaily');
+    if (result.mode === 'learn') return t('recLearn');
+    if (result.mode === 'challenge') return t(result.outcome === 'win' ? 'recChallengeWon' : 'recChallengeLost');
+    return t(result.outcome === 'win' ? 'recPracticeWon' : 'recPracticeLost');
   }
 
   openLessonResults(lesson, achievementsUnlocked) {
     const idx = LESSONS.findIndex((l) => l.id === lesson.id);
     const next = LESSONS[idx + 1];
-    const actions = [
-      next
-        ? el('button', { class: 'primary-btn', onclick: () => { this.closeModal(); this.startLesson(next); } }, `Next: ${next.name}`)
-        : el('button', { class: 'primary-btn', onclick: () => { this.closeModal(); this.leaveMatch(); this.showScreen('modes'); } }, 'Start playing'),
-      el('button', { class: 'ghost-btn', onclick: () => { this.closeModal(); this.leaveMatch(); this.showScreen('lessons'); } }, 'All lessons'),
-    ];
-    const sheet = el('div', { class: 'sheet results', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Lesson complete' },
-      el('h3', { class: 'won' }, 'Lesson Complete'),
-      el('p', { class: 'results-sub' }, lesson.name),
-      (achievementsUnlocked || []).length
-        ? el('div', { class: 'ach-row' }, achievementsUnlocked.map((k) => el('div', { class: 'ach-badge' }, `🏅 ${ACHIEVEMENTS.find((a) => a.key === k)?.name || k}`)))
-        : null,
-      el('div', { class: 'sheet-actions' }, actions),
-    );
-    this.openModal(sheet);
-    this.announce(`Lesson complete: ${lesson.name}.`);
+    const build = () => {
+      const actions = [
+        next
+          ? el('button', { class: 'primary-btn', 'data-act': 'next', onclick: () => { this.closeModal(); this.startLesson(next); } }, t('nextName', { name: lessonText(next, 'name', next.name) }))
+          : el('button', { class: 'primary-btn', 'data-act': 'play', onclick: () => { this.closeModal(); this.leaveMatch(); this.showScreen('modes'); } }, t('startPlaying')),
+        el('button', { class: 'ghost-btn', 'data-act': 'lessons', onclick: () => { this.closeModal(); this.leaveMatch(); this.showScreen('lessons'); } }, t('allLessons')),
+      ];
+      return el('div', { class: 'sheet results', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('lessonCompleteAria') },
+        el('h3', { class: 'won' }, t('lessonComplete')),
+        el('p', { class: 'results-sub' }, lessonText(lesson, 'name', lesson.name)),
+        (achievementsUnlocked || []).length
+          ? el('div', { class: 'ach-row' }, achievementsUnlocked.map((k) => {
+            const a = ACHIEVEMENTS.find((x) => x.key === k);
+            return el('div', { class: 'ach-badge' }, `🏅 ${a ? achievementText(a, 0) : k}`);
+          }))
+          : null,
+        el('div', { class: 'sheet-actions' }, actions),
+      );
+    };
+    this.openModal(build(), { render: build });
+    this.announce(t('lessonCompleteAnnounce', { name: lessonText(lesson, 'name', lesson.name) }));
   }
 
   // ================= settings =================
@@ -1545,11 +1633,11 @@ export class UI {
         class: 'ghost-btn small',
         onclick: () => this._captureBinding(action),
       }, keys.map(codeLabel).join(' / '));
-      this.bindingsEditor.append(el('div', { class: 'binding-row' }, el('span', {}, BINDING_LABELS[action] || action), btn));
+      this.bindingsEditor.append(el('div', { class: 'binding-row' }, el('span', {}, bindingLabel(action)), btn));
     }
     this.bindingsEditor.append(el('button', {
       class: 'ghost-btn small', id: 'btn-reset-keys', onclick: () => this.resetBindings(),
-    }, shText('resetKeys')));
+    }, sh('resetKeys')));
   }
 
   resetBindings() {
@@ -1560,7 +1648,7 @@ export class UI {
   }
 
   _captureBinding(action) {
-    this.toast(`Press a key for “${BINDING_LABELS[action]}”… (Esc cancels)`);
+    this.toast(t('pressKey', { action: bindingLabel(action) }));
     const handler = (e) => {
       e.preventDefault();
       window.removeEventListener('keydown', handler, true);
@@ -1580,10 +1668,10 @@ export class UI {
   }
 
   resetProgress() {
-    if (!confirm('Reset all local progress, settings stay. This cannot be undone.')) return;
+    if (!confirm(t('resetConfirm'))) return;
     const sealed = this.store.saveProgression({ ...this.store.loadProgression(), journey: {}, lessons: {}, challenges: {}, dailies: {}, achievements: {}, stats: { roundsPlayed: 0, roundsWon: 0, roundsDrawn: 0, byMode: {}, totalScore: 0 } });
     this.session.emit('progress-saved', sealed);
-    this.toast('Progress reset.');
+    this.toast(t('progressReset'));
     this._refreshTitleCards();
   }
 

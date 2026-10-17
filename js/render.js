@@ -400,15 +400,15 @@ export class BoardRenderer {
   }
 
   /** What the settings panel shows: GPU, auto choice, resolved tiers, cost and frame rate. */
-  graphicsInfo() {
+  graphicsInfo(words) {
     const w = this.canvas.clientWidth || 0;
     const h = this.canvas.clientHeight || 0;
     const px = [Math.round(w * this.pixelRatio), Math.round(h * this.pixelRatio)];
     return {
-      gpu: this.gpu || 'unknown GPU',
+      gpu: this.gpu || (words && words.unknownGpu) || 'unknown GPU',
       detected: this.detected,
       resolved: this.q,
-      summary: describe(this.q, px),
+      summary: describe(this.q, px, words || undefined),
       fps: Math.round(this.fps || 0),
       adaptiveScale: Math.round(this.adaptiveScale * 100) / 100,
       postFailed: !!this.postFailed,
