@@ -270,6 +270,7 @@ async function testGraphics(page, name) {
   let g = await gfxSaved();
   if (g.preset !== 'high' || g.bloom !== 'off') throw new Error('graphics not saved: ' + JSON.stringify(g));
   await page.waitForFunction(() => /2048² shadows/.test(document.querySelector('#gfx-summary')?.textContent || '') && !/bloom/.test(document.querySelector('#gfx-summary').textContent));
+  if (!/ · Level 0 · /.test(await page.textContent('#gfx-summary'))) throw new Error(`summary lacks the hardware level: ${await page.textContent('#gfx-summary')}`);
   const fits = await page.evaluate(() => {
     const r = document.querySelector('#gfx-section').getBoundingClientRect();
     return r.left >= 0 && r.right <= innerWidth + 0.5 && document.documentElement.scrollWidth <= innerWidth + 1;

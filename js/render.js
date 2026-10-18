@@ -13,7 +13,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RngStream } from './rng.js';
-import { detectPreset, describe, resolve, SHADOW_MAP } from './gfx.js';
+import { detectLevel, presetForLevel, describe, resolve, SHADOW_MAP } from './gfx.js';
 
 // Authored framing constants (no magic offsets elsewhere).
 const FRAMING = {
@@ -30,12 +30,33 @@ const FRAMING = {
   camTransitionMs: 550,
 };
 
-// Particle budgets per `particles` tier: chalk-dust pool, burst size per
-// mark, and drifting motes hanging in the lamp light.
-const PARTICLES = {
-  low: { pool: 300, dustPerMark: 10, motes: 0 },
-  high: { pool: 2200, dustPerMark: 40, motes: 140 },
-};
+// Particle budgets per `particles` tier: chalk-dust pool, burst size per mark and drifting motes in the
+// lamp light. "low" is fixed; "high" comes from the preset's budget (gfx.js BUDGETS, scaled with the level).
+const PARTICLES_LOW = { pool: 300, dustPerMark: 10, motes: 0 };
+const particleBudget = (q) => (q.particles === 'high' ? q.budget.particles : PARTICLES_LOW);
+
+// Lit materials at the preset budget's shading model (gfx.js BUDGETS.material): Lambert on Low,
+// Standard on Balanced, Physical (the lacquered clear-coated frame) on High/Ultra. Parameters a class
+// lacks are dropped; `physical` marks the materials that use the Physical model where allowed.
+const LIT = { lambert: THREE.MeshLambertMaterial, standard: THREE.MeshStandardMaterial, physical: THREE.MeshPhysicalMaterial };
+function litMaterial(tier, params, physical = false) {
+  const kind = tier === 'lambert' ? 'lambert' : physical && tier === 'physical' ? 'physical' : 'standard';
+  const m = new LIT[kind]();
+  for (const [k, v] of Object.entries(params)) {
+    if (!(k in m)) continue;
+    if (m[k] && m[k].isColor) m[k].set(v); else m[k] = v;
+  }
+  return m;
+}
+
+// Run a post pass at a fraction of the frame: EffectComposer.addPass/setSize hand every pass the full
+// frame size, so the pass's own setSize applies the budget's scale (half-res bloom/GTAO below Ultra).
+function atScale(pass, k) {
+  if (!(k > 0 && k < 1)) return pass;
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
+}
 
 // Colour grade + vignette (display-space colours in, display-space out).
 const GradeShader = {
@@ -348,7 +369,15 @@ export class BoardRenderer {
     } catch {
       this.gpu = '';
     }
-    this.detected = detectPreset(this.gpu, { mobile: isMobileDevice() });
+    // StarHermit hardware level (js/gpu-level.js): renderer string + device facts (phone/tablet, cores,
+    // memory, screen); phones and tablets are capped at level 9 (Balanced).
+    let sys = { mobile: isMobileDevice() };
+    try {
+      const G = globalThis.StarHermitGpu;
+      if (G) { const d = G.detectSystem(); sys = { ...d, mobile: !!(sys.mobile || d.mobile), gpu: undefined }; }
+    } catch { /* defaults */ }
+    this.gpuLevel = detectLevel(this.gpu, sys);
+    this.detected = presetForLevel(this.gpuLevel);
     // Studio environment for image-based lighting (generated once per context).
     this.envMap = null;
     try {
@@ -362,7 +391,7 @@ export class BoardRenderer {
     }
     this.composer = null;
     this.postKey = null;
-    this.q = resolve(this.savedGfx, this.detected);
+    this.q = resolve(this.savedGfx, this.detected, this.gpuLevel);
     this._applyShadowSettings();
     this._applySize();
   }
@@ -373,7 +402,7 @@ export class BoardRenderer {
   setGraphics(saved) {
     const prev = this.q;
     this.savedGfx = saved || {};
-    this.q = resolve(this.savedGfx, this.detected);
+    this.q = resolve(this.savedGfx, this.detected, this.gpuLevel);
     const q = this.q;
     this.adaptiveScale = 1;
     this._frames = [];
@@ -386,7 +415,7 @@ export class BoardRenderer {
     this._applySize();
     if (!this.scene) return;
     // Scene content (textures, props, particle pools) depends on these.
-    if (prev && (prev.detail !== q.detail || prev.particles !== q.particles)) {
+    if (prev && (prev.detail !== q.detail || prev.particles !== q.particles || JSON.stringify(prev.budget) !== JSON.stringify(q.budget))) {
       this._rebuildScenePreserving();
       return;
     }
@@ -406,6 +435,7 @@ export class BoardRenderer {
     const px = [Math.round(w * this.pixelRatio), Math.round(h * this.pixelRatio)];
     return {
       gpu: this.gpu || (words && words.unknownGpu) || 'unknown GPU',
+      level: this.gpuLevel,
       detected: this.detected,
       resolved: this.q,
       summary: describe(this.q, px, words || undefined),
@@ -457,7 +487,7 @@ export class BoardRenderer {
 
   _postKey(w, h) {
     const q = this.q;
-    return q.post ? [q.ao, q.bloom, q.grade, q.antialias, w, h, this.pixelRatio].join('|') : 'none';
+    return q.post ? [q.ao, q.bloom, q.grade, q.antialias, w, h, this.pixelRatio, q.budget.bloomRes, q.budget.aoRes].join('|') : 'none';
   }
 
   _buildPost(w, h) {
@@ -475,7 +505,7 @@ export class BoardRenderer {
       composer.setSize(w, h);
       composer.addPass(new RenderPass(this.scene, this.camera));
       if (q.ao !== 'off') {
-        const ao = new GTAOPass(this.scene, this.camera, w * pr, h * pr);
+        const ao = atScale(new GTAOPass(this.scene, this.camera, w * pr, h * pr), q.budget.aoRes);
         ao.output = GTAOPass.OUTPUT.Default;
         ao.blendIntensity = 0.75;
         const hi = q.ao === 'high';
@@ -485,7 +515,7 @@ export class BoardRenderer {
       }
       if (q.bloom === 'on') {
         // High threshold: only glowing marks, win lines and hot highlights bloom.
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.3, 0.4, 0.92));
+        composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.3, 0.4, 0.92), q.budget.bloomRes));
       }
       composer.addPass(new OutputPass());
       if (q.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
@@ -569,17 +599,18 @@ export class BoardRenderer {
     this.scene.add(this.fillLight);
 
     // Ground: a dark desk top (wood planks at detailed quality).
-    const groundMat = new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 1, metalness: 0, envMapIntensity: 0.25 });
+    const B = this.q.budget;
+    const groundMat = litMaterial(B.material, { color: theme.ground, roughness: 1, metalness: 0, envMapIntensity: 0.25 });
     if (detailed) {
-      const wood = makeWoodTextures(theme.ground, this.visualSeed ^ 0xde5c, { planks: 4, strength: 0.6 });
+      const wood = makeWoodTextures(theme.ground, this.visualSeed ^ 0xde5c, { planks: 4, strength: 0.6, size: B.texture });
       for (const t of [wood.map, wood.roughnessMap]) t.repeat.set(18, 18);
       groundMat.map = wood.map;
-      groundMat.roughnessMap = wood.roughnessMap;
+      if ('roughnessMap' in groundMat) groundMat.roughnessMap = wood.roughnessMap;
       groundMat.color.set(0xffffff);
       groundMat.roughness = 0.95;
       groundMat.envMapIntensity = 0.12;
     }
-    this.ground = new THREE.Mesh(new THREE.CircleGeometry(40, 64), groundMat);
+    this.ground = new THREE.Mesh(new THREE.CircleGeometry(40, B.round * 2), groundMat);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.position.y = -FRAMING.boardThickness - 0.02;
     this.ground.receiveShadow = true;
@@ -588,7 +619,7 @@ export class BoardRenderer {
 
     this._chalkGrain = null;
     if (detailed) {
-      this._chalkGrain = makeGrainTexture(this.visualSeed ^ 0xc4a1, 128, 2200);
+      this._chalkGrain = makeGrainTexture(this.visualSeed ^ 0xc4a1, B.texture / 4, Math.round(2200 * (B.texture / 512) ** 2));
       this._chalkGrain.repeat.set(6, 1);
       this._chalkGrain.userData.shared = true;
     }
@@ -612,23 +643,24 @@ export class BoardRenderer {
     const n = this.config.boardSize;
     const W = FRAMING.boardWorld;
     const surfaceTex = makeSurfaceTexture(theme, this.visualSeed, n);
+    const B = this.q.budget;
 
     // Frame: larger rounded slab beneath the play surface.
     const frameShape = roundedRectShape(W + FRAMING.frameMargin * 2, W + FRAMING.frameMargin * 2, 0.14);
-    const frameGeo = new THREE.ExtrudeGeometry(frameShape, { depth: FRAMING.boardThickness, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2 });
+    const frameGeo = new THREE.ExtrudeGeometry(frameShape, { depth: FRAMING.boardThickness, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: B.bevel, curveSegments: B.curve });
     frameGeo.rotateX(-Math.PI / 2);
     const detailed = this.q.detail === 'detailed';
     // Lacquered wooden frame: grain maps plus a thin clearcoat at detailed quality.
-    const frameMat = new THREE.MeshPhysicalMaterial({
+    const frameMat = litMaterial(B.material, {
       color: theme.frame, roughness: 0.7, metalness: 0.0, envMapIntensity: 0.3,
       clearcoat: detailed ? 0.3 : 0, clearcoatRoughness: 0.5,
-    });
+    }, true);
     if (detailed) {
-      const wood = makeWoodTextures(theme.frame, this.visualSeed ^ 0xf4a3);
+      const wood = makeWoodTextures(theme.frame, this.visualSeed ^ 0xf4a3, { size: B.texture });
       // ExtrudeGeometry UVs are in world units; tile the grain along the rails.
       for (const t of [wood.map, wood.roughnessMap]) t.repeat.set(0.35, 0.35);
       frameMat.map = wood.map;
-      frameMat.roughnessMap = wood.roughnessMap;
+      if ('roughnessMap' in frameMat) frameMat.roughnessMap = wood.roughnessMap;
       frameMat.color.set(0xffffff);
       frameMat.roughness = 0.9;
     }
@@ -641,7 +673,7 @@ export class BoardRenderer {
 
     // Play surface.
     const boardShape = roundedRectShape(W, W, 0.08);
-    const boardGeo = new THREE.ExtrudeGeometry(boardShape, { depth: 0.045, bevelEnabled: false });
+    const boardGeo = new THREE.ExtrudeGeometry(boardShape, { depth: 0.045, bevelEnabled: false, curveSegments: B.curve });
     boardGeo.rotateX(-Math.PI / 2);
     // Normalize UVs to 0..1 across the board face so the procedural grid
     // aligns exactly with logical cells.
@@ -657,10 +689,10 @@ export class BoardRenderer {
       }
       uv.needsUpdate = true;
     }
-    const boardMat = new THREE.MeshStandardMaterial({ map: surfaceTex, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.35 });
+    const boardMat = litMaterial(B.material, { map: surfaceTex, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.35 });
     if (detailed) {
       // Slate pores: a fine bump map gives the surface a satin, stony sheen.
-      const grain = makeGrainTexture(this.visualSeed ^ 0x51a7, 256, 6000);
+      const grain = makeGrainTexture(this.visualSeed ^ 0x51a7, B.texture / 2, Math.round(6000 * (B.texture / 512) ** 2));
       grain.repeat.set(3, 3);
       boardMat.bumpMap = grain;
       boardMat.bumpScale = 0.6;
@@ -678,15 +710,15 @@ export class BoardRenderer {
     for (const c of this.config.disabledCells) {
       const { x, z } = this.cellCenter(c);
       const plug = new THREE.Mesh(
-        new THREE.CylinderGeometry(cell * 0.32, cell * 0.32, 0.03, 24),
-        new THREE.MeshStandardMaterial({ color: this.theme.grid, roughness: 1, emissive: this.theme.grid, emissiveIntensity: 0.06 })
+        new THREE.CylinderGeometry(cell * 0.32, cell * 0.32, 0.03, B.round),
+        litMaterial(B.material, { color: this.theme.grid, roughness: 1, emissive: this.theme.grid, emissiveIntensity: 0.06 })
       );
       plug.position.set(x, 0.062, z);
       plug.layers.set(LAYER_ENV);
       this.boardGroup.add(plug);
       const groove = new THREE.Mesh(
         new THREE.BoxGeometry(cell * 0.34, 0.012, cell * 0.07),
-        new THREE.MeshStandardMaterial({ color: this.theme.boardEdge, roughness: 1 })
+        litMaterial(B.material, { color: this.theme.boardEdge, roughness: 1 })
       );
       groove.position.set(x, 0.082, z);
       groove.rotation.y = Math.PI / 4;
@@ -720,9 +752,10 @@ export class BoardRenderer {
     const theme = this.theme;
     const rng = new RngStream(this.visualSeed ^ 0xca1c);
     this.propsGroup = new THREE.Group();
-    const chalkMat = new THREE.MeshStandardMaterial({ color: theme.markA, roughness: 1, bumpMap: this._chalkGrain, bumpScale: 1.5, envMapIntensity: 0.3 });
-    const chalkMat2 = new THREE.MeshStandardMaterial({ color: theme.markB, roughness: 1, bumpMap: this._chalkGrain, bumpScale: 1.5, envMapIntensity: 0.3 });
-    const stickGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.42, 12);
+    const B = this.q.budget;
+    const chalkMat = litMaterial(B.material, { color: theme.markA, roughness: 1, bumpMap: this._chalkGrain, bumpScale: 1.5, envMapIntensity: 0.3 });
+    const chalkMat2 = litMaterial(B.material, { color: theme.markB, roughness: 1, bumpMap: this._chalkGrain, bumpScale: 1.5, envMapIntensity: 0.3 });
+    const stickGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.42, Math.max(6, B.round / 2));
     const groundY = -FRAMING.boardThickness - 0.02;
     const s1 = new THREE.Mesh(stickGeo, chalkMat);
     s1.rotation.set(Math.PI / 2, 0, rng.range(-0.4, 0.4));
@@ -732,7 +765,7 @@ export class BoardRenderer {
     s2.position.set(2.05, groundY + 0.035, 1.25);
     const eraser = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.14, 0.22),
-      new THREE.MeshStandardMaterial({ color: theme.frame, roughness: 0.75, envMapIntensity: 0.5 })
+      litMaterial(B.material, { color: theme.frame, roughness: 0.75, envMapIntensity: 0.5 })
     );
     eraser.position.set(-2.2, groundY + 0.07, -1.1);
     eraser.rotation.y = rng.range(-0.5, 0.5);
@@ -753,7 +786,7 @@ export class BoardRenderer {
   }
 
   _chalkMaterial(color, opacity = 1, glow = 0) {
-    return new THREE.MeshStandardMaterial({
+    return litMaterial(this.q.budget.material, {
       color,
       roughness: 1,
       metalness: 0,
@@ -781,7 +814,7 @@ export class BoardRenderer {
 
     const stroke = (points) => {
       const curve = new THREE.CatmullRomCurve3(points);
-      const geo = new THREE.TubeGeometry(curve, 24, cell * 0.045, 7, false);
+      const geo = new THREE.TubeGeometry(curve, this.q.budget.tube, cell * 0.045, this.q.budget.tubeRadial, false);
       // Chalk roughness: jitter vertices along normals-ish directions.
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) {
@@ -840,7 +873,7 @@ export class BoardRenderer {
 
   _buildParticles() {
     // Pooled chalk dust: fixed buffers, zero per-frame allocation.
-    const cap = PARTICLES[this.q.particles].pool;
+    const cap = particleBudget(this.q).pool;
     this.dust = {
       cap,
       alive: 0,
@@ -878,7 +911,7 @@ export class BoardRenderer {
   // Purely ambient: frozen under reduced motion, never pickable.
   _buildMotes() {
     this.motes = null;
-    const count = PARTICLES[this.q.particles].motes;
+    const count = particleBudget(this.q).motes;
     if (!count) return;
     const rng = new RngStream((this.visualSeed ^ 0x3073) >>> 0);
     const pos = new Float32Array(count * 3);
@@ -1141,7 +1174,7 @@ export class BoardRenderer {
   _spawnDust(x, z, player) {
     const d = this.dust;
     if (!d) return;
-    const count = PARTICLES[this.q.particles].dustPerMark;
+    const count = particleBudget(this.q).dustPerMark;
     const colors = this._markColors();
     this.dustPoints.material.color.set(player === 1 ? colors.a : colors.b);
     for (let n = 0; n < count; n++) {
@@ -1488,7 +1521,7 @@ export class BoardRenderer {
 
   _applySize() {
     if (!this.renderer) return;
-    const q = this.q || resolve(this.savedGfx, this.detected);
+    const q = this.q || resolve(this.savedGfx, this.detected, this.gpuLevel);
     const dpr = Math.min(window.devicePixelRatio || 1, q.dprCap) * q.scale * this.adaptiveScale;
     this.pixelRatio = Math.max(0.5, dpr);
     this.renderer.setPixelRatio(this.pixelRatio);

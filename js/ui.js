@@ -577,7 +577,9 @@ export class UI {
     }
     this.gfxAdaptive.checked = g.adaptive !== false;
     this.gfxFps.checked = !!g.show_fps;
-    this.gfxSummary.textContent = info ? `${info.gpu} · ${info.summary}` : '';
+    this.gfxSummary.textContent = info
+      ? [info.gpu, Number.isFinite(info.level) ? gt('words.level', { n: info.level }) : null, info.summary].filter(Boolean).join(' · ')
+      : '';
     this.gfxPostNote.hidden = !info?.postFailed;
   }
 
