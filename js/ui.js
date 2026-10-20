@@ -155,6 +155,21 @@ export class UI {
     this.hudNameEl = el('div', { id: 'player-name', 'aria-label': lv('player') });
     this.syncEl = el('div', { id: 'sync-status', role: 'status' });
     const hudTop = el('div', { id: 'hud-top' }, this.objectiveEl, this.turnBanner, this.clockEl, this.btnPause, this.hudNameEl, this.syncEl);
+    // The objective, turn banner and clock sit left of the pause button, so a
+    // change in their width moves it; a click only fires when press and
+    // release land on the same element. Their text waits while a pointer is
+    // pressed in the top row and is applied right after the release.
+    this._topHeld = null;
+    hudTop.addEventListener('pointerdown', () => { this._topHeld = this._topHeld || new Map(); });
+    for (const type of ['pointerup', 'pointercancel']) {
+      document.addEventListener(type, () => {
+        const held = this._topHeld;
+        if (!held) return;
+        this._topHeld = null;
+        // The click follows this release in the same task; apply after it.
+        setTimeout(() => { for (const [node, text] of held) this._setTopText(node, text); }, 0);
+      }, true);
+    }
 
     this.railLeft = el('aside', { id: 'rail-left', 'aria-label': lv('matchProgress') });
     this.railRight = el('aside', { id: 'rail-right', 'aria-label': lv('actions') });
@@ -1315,12 +1330,18 @@ export class UI {
       el('div', { class: 'rail-block' }, el('small', {}, this._rulesSummary(this.session.state.config))),
       el('div', { class: 'rail-block' }, el('small', {}, t('seedN', { n: this.session.state.seed }))),
     );
-    this.objectiveEl.textContent = m.mode === 'learn'
+    this._setTopText(this.objectiveEl, m.mode === 'learn'
       ? this._lessonStepText(lessonInfo)
       : m.config.misere
         ? t('objMisere')
-        : t('objLine', { n: m.config.winLength });
+        : t('objLine', { n: m.config.winLength }));
     this._updateHud();
+  }
+
+  /** Text of the HUD's top row; held while a pointer is pressed there (see _build). */
+  _setTopText(node, text) {
+    if (this._topHeld) this._topHeld.set(node, text);
+    else node.textContent = text;
   }
 
   _updateHud() {
@@ -1329,11 +1350,11 @@ export class UI {
     if (!state || !s.match) return;
     const human = state.currentPlayer === s.match.humanPlayer;
     if (s.phase === PHASE.TUTORIAL) {
-      this.turnBanner.textContent = t(human ? 'yourMove' : 'watch');
+      this._setTopText(this.turnBanner, t(human ? 'yourMove' : 'watch'));
     } else {
-      this.turnBanner.textContent = t(state.status === 'terminal'
+      this._setTopText(this.turnBanner, t(state.status === 'terminal'
         ? 'roundOver'
-        : human ? 'yourMove' : 'rivalThinking');
+        : human ? 'yourMove' : 'rivalThinking'));
     }
     this.turnBanner.classList.toggle('yours', human && state.status === 'active');
     this.btnUndo.disabled = !s.canUndo();
@@ -1355,7 +1376,7 @@ export class UI {
     const s = this.session;
     const limit = s.state?.config?.timeLimitMs;
     if (!limit) {
-      this.clockEl.textContent = '';
+      this._setTopText(this.clockEl, '');
       return;
     }
     const human = s.match.humanPlayer;
@@ -1368,7 +1389,7 @@ export class UI {
       const remain = Math.max(0, limit - used);
       parts.push(t(p === human ? 'clockYou' : 'clockRival', { time: fmtTime(remain) }));
     }
-    this.clockEl.textContent = parts.join(' · ');
+    this._setTopText(this.clockEl, parts.join(' · '));
   }
 
   // ================= actions =================
