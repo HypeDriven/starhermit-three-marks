@@ -9,7 +9,13 @@ import {
 import { PracticeAI, difficultyById } from './ai.js';
 import { unlockAchievement, dailyStreak } from './storage.js';
 import { LESSONS, JOURNEY_STAGES, CONTENT_VERSION } from './content.js';
-import { randomId } from './platform.js';
+
+let idCounter = 0;
+/** A match id (command ids); no crypto needed. */
+export function randomId() {
+  idCounter = (idCounter + 1) >>> 0;
+  return 'm-' + Math.floor(Math.random() * 1e9).toString(36) + '-' + idCounter.toString(36);
+}
 
 export const PHASE = {
   BOOT: 'boot',
@@ -46,8 +52,16 @@ class Emitter {
 }
 
 export class GameSession extends Emitter {
-  constructor({ platform, store, audio }) {
+  // timers: { setTimeout, clearTimeout, setInterval, clearInterval } (the
+  // engine client passes fixed-step timers so rounds replay exactly; default
+  // the host's). think(ai, state, player, done): the AI's move, done(cell,
+  // rngState) — the engine client searches on a worker; by default the
+  // search runs here at once.
+  constructor({ platform, store, audio, timers, think }) {
     super();
+    this.timers = timers || globalThis;
+    this.think = think || ((ai, state, player, done) => done(ai.chooseCell(state, player), ai.rng.state));
+    this.aiToken = 0;
     this.platform = platform;
     this.store = store;
     this.audio = audio;
@@ -132,7 +146,7 @@ export class GameSession extends Emitter {
     this.emit('round-start', this.snapshotInfo());
     this.emit('state', this.state);
     const delay = this.audio?.settings?.accessibility?.reducedMotion ? 150 : 900;
-    this.resolveTimer = setTimeout(() => this.beginTurn(), delay);
+    this.resolveTimer = this.timers.setTimeout(() => this.beginTurn(), delay);
   }
 
   beginTurn() {
@@ -148,12 +162,28 @@ export class GameSession extends Emitter {
 
   scheduleAI() {
     const thinking = 450 + (this.state.turnNumber % 3) * 150; // readable pace, not instant
-    this.aiTimer = setTimeout(() => {
+    this.aiTimer = this.timers.setTimeout(() => {
       if (this.phase !== PHASE.ACTIVE || !this.state || this.state.status !== 'active') return;
       const player = this.state.currentPlayer;
-      const cell = this.ai.chooseCell(this.state, player);
-      if (cell >= 0) this.commit({ player, type: 'place', cell });
+      this.askAI(this.state, player, (cell) => {
+        if (this.phase !== PHASE.ACTIVE || !this.state || this.state.status !== 'active' || this.state.currentPlayer !== player) return;
+        if (cell >= 0) this.commit({ player, type: 'place', cell });
+      });
     }, thinking);
+  }
+
+  // The AI's choice through think(); a pause, undo or new round in the
+  // meantime drops the answer (and leaves the AI's stream as it was).
+  askAI(state, player, use) {
+    const token = ++this.aiToken;
+    const ai = this.ai;
+    this.thinking = true;
+    this.think(ai, state, player, (cell, rngState) => {
+      if (token !== this.aiToken || ai !== this.ai) return;
+      this.thinking = false;
+      if (rngState != null) ai.rng.state = rngState >>> 0;
+      use(cell);
+    });
   }
 
   // Human (or AI) entry point: build a validated command and apply it.
@@ -214,7 +244,7 @@ export class GameSession extends Emitter {
     this.stopClockWatch();
     const limit = this.state?.config?.timeLimitMs;
     if (!limit) return;
-    this.clockTimer = setInterval(() => {
+    this.clockTimer = this.timers.setInterval(() => {
       if (this.phase !== PHASE.ACTIVE || !this.state || this.state.status !== 'active') return;
       const player = this.state.currentPlayer;
       const used = this.state.playerTimeMs[player] + (this.platform.serverNow() - this.turnStartedAt);
@@ -229,13 +259,13 @@ export class GameSession extends Emitter {
   }
 
   stopClockWatch() {
-    if (this.clockTimer) clearInterval(this.clockTimer);
+    if (this.clockTimer) this.timers.clearInterval(this.clockTimer);
     this.clockTimer = null;
   }
 
   finishRound() {
     this.stopClockWatch();
-    if (this.aiTimer) clearTimeout(this.aiTimer);
+    if (this.aiTimer) this.timers.clearTimeout(this.aiTimer);
     this.setPhase(PHASE.RESOLVING, 'session', this.state.terminalReason);
     const m = this.match;
     const s = this.state;
@@ -260,7 +290,7 @@ export class GameSession extends Emitter {
       else this.audio.lose();
     }
     const delay = this.audio?.settings?.accessibility?.reducedMotion ? 400 : 1600;
-    this.resolveTimer = setTimeout(() => this.afterRound(roundResult), delay);
+    this.resolveTimer = this.timers.setTimeout(() => this.afterRound(roundResult), delay);
   }
 
   afterRound(roundResult) {
@@ -421,7 +451,9 @@ export class GameSession extends Emitter {
 
   undo() {
     if (!this.canUndo()) return { ok: false, reason: 'undo-unavailable' };
-    if (this.aiTimer) clearTimeout(this.aiTimer);
+    if (this.aiTimer) this.timers.clearTimeout(this.aiTimer);
+    this.aiToken++;
+    this.thinking = false;
     // Roll back to the most recent state where the human is to move.
     const human = this.match.humanPlayer;
     let target = null;
@@ -451,9 +483,11 @@ export class GameSession extends Emitter {
 
   pause(reason = 'user') {
     if (!this.isPausable()) return false;
-    if (this.aiTimer) { clearTimeout(this.aiTimer); this.aiTimer = null; }
+    if (this.aiTimer) { this.timers.clearTimeout(this.aiTimer); this.aiTimer = null; }
+    this.aiToken++;
+    this.thinking = false;
     // During countdown the round-opening timer is pending; freeze it too.
-    if (this.resolveTimer) { clearTimeout(this.resolveTimer); this.resolveTimer = null; }
+    if (this.resolveTimer) { this.timers.clearTimeout(this.resolveTimer); this.resolveTimer = null; }
     this.stopClockWatch();
     this.pausedFrom = this.phase;
     this.pausedAt = this.platform.serverNow();
@@ -648,16 +682,21 @@ export class GameSession extends Emitter {
   }
 
   scheduleLessonAi() {
-    if (this.aiTimer) clearTimeout(this.aiTimer);
-    this.aiTimer = setTimeout(() => this.lessonAiMove(), 650);
+    if (this.aiTimer) this.timers.clearTimeout(this.aiTimer);
+    this.aiTimer = this.timers.setTimeout(() => this.lessonAiMove(), 650);
   }
 
   lessonAiMove() {
     if (this.phase !== PHASE.TUTORIAL || !this.lesson || this.state.status !== 'active') return;
     const step = this.lesson.def.steps[this.lesson.stepIndex];
     const human = this.match.humanPlayer;
-    const cell = this.ai.chooseCell(this.state, this.state.currentPlayer);
-    if (cell < 0) return;
+    this.askAI(this.state, this.state.currentPlayer, (cell) => {
+      if (this.phase !== PHASE.TUTORIAL || !this.lesson || this.state.status !== 'active') return;
+      if (cell >= 0) this.lessonAiReply(step, human, cell);
+    });
+  }
+
+  lessonAiReply(step, human, cell) {
     this.commitLessonMove(cell);
     if (this.state.status === 'terminal') {
       const lost = this.state.winner !== 0 && this.state.winner !== human;
@@ -676,7 +715,7 @@ export class GameSession extends Emitter {
 
   advanceLessonStep() {
     const { def } = this.lesson;
-    if (this.aiTimer) clearTimeout(this.aiTimer);
+    if (this.aiTimer) this.timers.clearTimeout(this.aiTimer);
     if (this.lesson.stepIndex + 1 >= def.steps.length) {
       // Lesson complete.
       const prog = this.store.loadProgression();
@@ -719,8 +758,10 @@ export class GameSession extends Emitter {
   }
 
   clearTimers() {
-    if (this.aiTimer) clearTimeout(this.aiTimer);
-    if (this.resolveTimer) clearTimeout(this.resolveTimer);
+    this.aiToken++;
+    this.thinking = false;
+    if (this.aiTimer) this.timers.clearTimeout(this.aiTimer);
+    if (this.resolveTimer) this.timers.clearTimeout(this.resolveTimer);
     this.aiTimer = null;
     this.resolveTimer = null;
     this.stopClockWatch();

@@ -1,0 +1,42 @@
+# Practice on a short landscape phone (keys and touch): Play from the title,
+# the selection moved by arrows and a mark placed with Enter, a hint, Undo,
+# the camera angle cycled, a mark placed by touching a cell, then paused and
+# left. The practice seed is random, so only the flow is checked.
+# viewport 844x390@3
+until 600 Three Marks
+frames 60
+save tm-land-title
+touch =Play
+until 600 =Undo
+frames 90
+key ArrowUp 1
+frames 5
+key Enter 1
+frames 10
+until 600 =Your move
+frames 30
+save tm-land-play
+key KeyH 1
+until 300 Hint: consider
+frames 10
+save tm-land-hint
+touch =Undo
+frames 20
+frames 10
+key KeyC 1
+until 300 Camera: Top-down
+frames 60
+save tm-land-top
+key KeyC 1
+frames 5
+key KeyC 1
+frames 60
+touch Row 3, column 3
+frames 30
+touch =Pause
+until 300 =Paused
+frames 10
+save tm-land-paused
+touch =Leave match
+until 300 Choose a Mode
+frames 10

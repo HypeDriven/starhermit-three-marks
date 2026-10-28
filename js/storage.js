@@ -2,7 +2,6 @@
 // Local documents are versioned and checksummed like the cloud-save format so
 // a host sync layer can exchange them without transformation.
 import { hashString } from './rng.js';
-import { defaultGraphics, migrateGraphics } from './gfx.js';
 
 export const SAVE_VERSION = 1;
 const LS_PREFIX = 'three-marks.';
@@ -20,7 +19,6 @@ export function defaultSettings() {
   return {
     version: SAVE_VERSION,
     audio: { music: 0.6, effects: 0.8, ambience: 0.5, voice: 0.8, muted: false },
-    graphics: defaultGraphics(), // see gfx.js: preset, render_scale, adaptive, show_fps, per-category overrides
     accessibility: {
       reducedMotion: false, highContrast: false, palette: 'default', // default|deuteranopia|tritanopia
       largerText: false, leftHanded: false, confirmMoves: false, timingAssist: false,
@@ -51,19 +49,19 @@ export function defaultProgression() {
   };
 }
 
-function checksum(doc) {
+export function checksum(doc) {
   const clone = { ...doc };
   delete clone.checksum;
   return hashString(JSON.stringify(clone)).toString(16).padStart(8, '0');
 }
 
-function seal(doc) {
+export function seal(doc) {
   const out = { ...doc };
   out.checksum = checksum(out);
   return out;
 }
 
-function unseal(doc) {
+export function unseal(doc) {
   if (!doc || typeof doc !== 'object') return null;
   if (doc.checksum && doc.checksum !== checksum(doc)) return null; // corrupt
   return doc;
@@ -158,7 +156,6 @@ export function migrateSettings(doc) {
     ...doc,
     version: SAVE_VERSION,
     audio: { ...base.audio, ...(doc.audio || {}) },
-    graphics: migrateGraphics(doc.graphics),
     accessibility: { ...base.accessibility, ...(doc.accessibility || {}) },
     camera: { ...base.camera, ...(doc.camera || {}) },
     tutorial: { ...base.tutorial, ...(doc.tutorial || {}) },

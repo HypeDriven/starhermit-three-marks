@@ -1,17 +1,49 @@
 name=Three Marks
 description=Take turns marking a three-by-three grid and complete a row, column, or diagonal to win.
-launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=score-script.js
 version=1.0.0
 cover=cover.jpg
+
+# StarHermit engine script game: one package, played natively by the
+# StarHermit client and in browsers by the engine's web runtime. Browsers open
+# launch=index.html, the loader `npm run package` writes (it pins the engine
+# on wiki.starhermit.com by hash; never edit it). Re-run `npm run package`
+# after every change and commit index.html + starhermit-files.json.
+launch=index.html
+engine.api=1
+engine.entry=native/main.ts
+engine.version=1.21.0
+engine.minor=23
+engine.capabilities=platform,storage,clipboard
+
+# Keyboard actions (players rebind keys and pads in the runtime's Options).
+# The slate is also played with the pointer or a finger: tap or click a cell
+# to place a mark (twice with "Confirm before placing"); a drag tilts the
+# camera a little.
+engine.group.confirm=Board
 control.confirm=Enter+Space | Place mark / confirm
-control.cancel=Escape | Cancel / back
-control.pause=KeyP | Pause
-control.undo=KeyU | Undo
-control.hint=KeyH | Hint
-control.cameraReset=KeyC | Reset camera
 control.up=ArrowUp | Move selection up
 control.down=ArrowDown | Move selection down
 control.left=ArrowLeft | Move selection left
 control.right=ArrowRight | Move selection right
+engine.group.cancel=Match
+control.cancel=Escape | Cancel / back
+control.pause=KeyP | Pause
+control.undo=KeyU | Undo
+control.hint=KeyH | Hint
+control.camera=KeyC | Change camera angle
+
+# Gamepad defaults (the browser build's): the D-pad or left stick moves the
+# selection, South places a mark, East cancels, Start pauses; West undoes,
+# North asks for a hint and the right stick press changes the camera angle.
+engine.gamepad.confirm=South
+engine.gamepad.cancel=East
+engine.gamepad.pause=Start
+engine.gamepad.undo=West
+engine.gamepad.hint=North
+engine.gamepad.camera=RightStickPress
+engine.gamepad.up=DpadUp+LeftStickUp
+engine.gamepad.down=DpadDown+LeftStickDown
+engine.gamepad.left=DpadLeft+LeftStickLeft
+engine.gamepad.right=DpadRight+LeftStickRight

@@ -1,0 +1,100 @@
+# Every screen the title links on a desktop window: All Modes and each mode's
+# screen (Journey, Challenges with a challenge sheet, Learn, Practice setup,
+# Hosted Play), the Daily sheet started, paused by Escape, Settings and How to
+# play from the pause sheet and back, left; Profile → Achievements; Settings
+# (the game's options, reset progress confirmation cancelled); How to play.
+# viewport 1280x800@1
+until 600 Three Marks
+frames 60
+save tm-title
+click All Modes. Learn
+until 300 Choose a Mode
+frames 10
+save tm-modes
+click Hosted Play. Head-to-head
+until 300 not available in this build
+frames 10
+save tm-hosted
+key Escape 1
+until 300 Choose a Mode
+frames 10
+click Challenge. Constrained
+until 300 Constrained goals for a sharp session
+frames 10
+click Ten-Second Slate. Ten seconds
+until 300 Win with a 10s clock
+frames 10
+save tm-challenge-sheet
+click =Cancel
+frames 10
+key Escape 1
+until 300 Choose a Mode
+frames 10
+click Practice. Free play
+until 300 Practice Setup
+frames 10
+key Escape 1
+until 300 Choose a Mode
+frames 10
+click Daily. One shared seed
+until 300 Date (UTC)
+frames 10
+save tm-daily-sheet
+click =Start
+until 600 =Undo
+frames 120
+key Escape 1
+until 300 =Paused
+frames 10
+save tm-paused
+click =Settings
+until 300 Color palette
+frames 10
+save tm-settings-pause
+key Escape 1
+until 300 =Paused
+frames 10
+click =How to play
+until 300 Your Controls
+frames 10
+key Escape 1
+until 300 =Paused
+frames 10
+click =Leave match
+until 300 Choose a Mode
+frames 10
+key Escape 1
+until 300 Three Marks
+frames 10
+click Profile. Progress
+until 300 Statistics
+frames 10
+save tm-profile
+click =Achievements
+until 300 Century of Marks
+frames 10
+save tm-achievements
+key Escape 1
+until 300 Statistics
+frames 10
+click =Settings #2
+until 300 Color palette
+frames 10
+click =Confirm before placing (tap twice)
+frames 10
+click =Reset all local progress
+until 300 cannot be undone
+frames 10
+save tm-reset
+click =Cancel
+frames 10
+click =Confirm before placing (tap twice)
+frames 10
+save tm-settings
+key Escape 1
+until 300 Statistics
+frames 10
+click =How to play
+until 300 The Goal
+frames 30
+save tm-help

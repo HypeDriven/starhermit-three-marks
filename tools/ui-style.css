@@ -1,0 +1,117 @@
+/* Three Marks — the browser build's css/style.css rewritten class-based for
+   the engine's UI (`npm run css` converts it into assets/ui-style.json).
+   Element selectors, ids, .high-contrast / .larger-text and @media do not
+   convert: every widget names its classes, the breakpoints are layouts
+   picked in native/screens.ts, high contrast is a token set native/style.ts
+   applies and larger text is the runtime's text scale. */
+
+:root {
+  --bg: #101218; --panel: rgba(22, 25, 34, 0.92); --panel-solid: #161922; --text: #ece7db; --text-dim: #a8a49a;
+  --accent: #e8b64c; --accent-2: #7fd4c1; --danger: #e0604f; --line: rgba(236, 231, 219, 0.14); --focus-ring: #ffd97a;
+  --ink: #201808; --warn-text: #f2b8b0;
+}
+
+* { box-sizing: border-box; }
+
+/* ------------------------------------------------------------- text */
+.text { color: var(--text); font-size: 16px; }
+.dim { color: var(--text-dim); font-size: 16px; }
+.small { color: var(--text-dim); font-size: 14px; }
+.tiny { color: var(--text-dim); font-size: 12.8px; }
+.strong { color: var(--text); font-size: 16.8px; font-weight: 700; }
+.title-h1 { color: var(--text); font-size: 64px; font-weight: 700; }
+.title-h1-small { color: var(--text); font-size: 41.6px; font-weight: 700; }
+.h2 { color: var(--text); font-size: 24px; font-weight: 700; }
+.h3 { color: var(--text); font-size: 18.7px; font-weight: 700; }
+.sheet-h { color: var(--text); font-size: 20.8px; font-weight: 700; }
+.sheet-h-won { color: var(--accent-2); font-size: 20.8px; font-weight: 700; }
+.sheet-h-lost { color: var(--danger); font-size: 20.8px; font-weight: 700; }
+.sheet-h-drew { color: var(--accent); font-size: 20.8px; font-weight: 700; }
+.chapter { color: var(--accent); font-size: 15.2px; font-weight: 700; }
+.legend { color: var(--accent); font-size: 13.6px; }
+.rule-h { color: var(--accent); font-size: 16px; font-weight: 700; }
+.rail-title { color: var(--text-dim); font-size: 12px; font-weight: 700; }
+.rail-text { color: var(--text); font-size: 14.4px; }
+.rail-strong { color: var(--text); font-size: 14.4px; font-weight: 700; }
+.rail-small { color: var(--text-dim); font-size: 12.8px; }
+.em { color: var(--accent-2); font-size: 13.6px; }
+.stars { color: var(--accent); font-size: 16px; }
+.stars-big { color: var(--accent); font-size: 25.6px; }
+.stage-num { color: var(--text-dim); font-size: 16px; font-weight: 700; }
+.objective-text { color: var(--text-dim); font-size: 13.6px; }
+.banner-text { color: var(--text); font-size: 16px; font-weight: 700; }
+.banner-text-yours { color: var(--ink); font-size: 16px; font-weight: 700; }
+.clock-text { color: var(--text); font-size: 13.6px; }
+.name-text { color: var(--text); font-size: 13.6px; font-weight: 600; }
+.sync-text { color: var(--text-dim); font-size: 12.8px; }
+.sync-saving { color: var(--accent); font-size: 12.8px; }
+.sync-synced { color: var(--accent-2); font-size: 12.8px; }
+.td { color: var(--text); font-size: 14.7px; }
+.td-num { color: var(--text); font-size: 14.7px; text-align: end; }
+.td-total { color: var(--text); font-size: 14.7px; font-weight: 700; }
+.badge-text { color: var(--accent); font-size: 13.6px; }
+.toast-text { color: var(--text); font-size: 14.4px; text-align: center; }
+.toast-warn-text { color: var(--warn-text); font-size: 14.4px; text-align: center; }
+.mini-x { color: #f2ead8; font-size: 14.4px; font-weight: 700; text-align: center; }
+.mini-o { color: #7fd4c1; font-size: 14.4px; font-weight: 700; text-align: center; }
+.mini-block { color: var(--danger); font-size: 14.4px; font-weight: 700; text-align: center; }
+.mini-empty { color: var(--text-dim); font-size: 14.4px; font-weight: 700; text-align: center; }
+.kbd-text { color: var(--text); font-size: 12.8px; }
+.btn-label { color: var(--text); font-size: 16px; }
+.btn-label-c { color: var(--text); font-size: 16px; text-align: center; }
+.btn-label-b { color: var(--text); font-size: 16.8px; font-weight: 700; }
+.btn-label-sub { color: var(--text-dim); font-size: 15.2px; }
+.btn-label-em { color: var(--accent-2); font-size: 13.6px; }
+.wrap { color: var(--text); font-size: 16px; }
+.wrap-ink { color: var(--ink); font-size: 16px; font-weight: 700; text-align: center; }
+
+/* ------------------------------------------------------------- surfaces */
+.scrim { background: rgba(6, 8, 12, 0.55); border-radius: 0; }
+.screen-dim { background: rgba(16, 18, 24, 0.55); border-radius: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 19.2px; }
+.rail { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.rail-bar { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px; }
+.pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5.6px 14.4px; }
+.pill-yours { background: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 6.4px 17.6px; }
+.pill-banner { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6.4px 17.6px; }
+.ach-badge { background: rgba(232, 182, 76, 0.14); border: 1px solid var(--accent); border-radius: 999px; padding: 4.8px 12.8px; }
+.kbd { background: rgba(236, 231, 219, 0.1); border: 1px solid var(--line); border-radius: 6px; padding: 2.4px 8px; }
+.mini-cell { background: rgba(236, 231, 219, 0.07); border-radius: 6px; }
+.row-line { border-bottom: 1px solid var(--line); border-radius: 0; padding: 5.6px 3.2px; }
+.toast { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 19px; padding: 8px 19.2px; }
+.toast-warn { background: var(--panel-solid); border: 1px solid var(--danger); border-radius: 19px; padding: 8px 19.2px; }
+.sheet { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 14px; padding: 25.6px; }
+.ach-locked { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12.8px 17.6px; opacity: 0.55; }
+.ach-unlocked { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12.8px 17.6px; }
+
+/* ------------------------------------------------------------- buttons */
+.primary-btn { text-align: center; min-height: 48px; padding: 0 32px; border-radius: 999px; background: var(--accent); color: var(--ink); font-weight: 700; font-size: 16px; }
+.primary-btn:hover { background: #f0c35e; }
+.primary-btn:disabled { opacity: 0.4; }
+.play-btn { text-align: center; min-height: 60px; padding: 14.4px 54.4px; border-radius: 999px; background: var(--accent); color: var(--ink); font-weight: 700; font-size: 20px; }
+.play-btn:hover { background: #f0c35e; }
+.ghost-btn { text-align: center; min-height: 44px; padding: 0 19.2px; border-radius: 999px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0); color: var(--text); font-size: 16px; }
+.ghost-btn:hover { border: 1px solid var(--accent); }
+.ghost-btn:disabled { opacity: 0.4; }
+.small-btn { text-align: center; min-height: 36px; padding: 0 12.8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0); color: var(--text); font-size: 13.6px; }
+.small-btn:hover { border: 1px solid var(--accent); }
+.danger-btn { text-align: center; min-height: 44px; padding: 0 19.2px; border-radius: 999px; border: 1px solid var(--danger); background: rgba(0, 0, 0, 0); color: var(--danger); font-size: 16px; }
+.danger-btn:hover { background: rgba(224, 96, 79, 0.12); }
+.icon-btn { text-align: center; min-width: 44px; min-height: 44px; padding: 0; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; }
+.icon-btn:hover { border: 1px solid var(--accent); }
+.back-btn { text-align: center; min-width: 44px; min-height: 44px; padding: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 19.2px; }
+.back-btn:hover { border: 1px solid var(--accent); }
+.action-btn { text-align: center; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(236, 231, 219, 0.06); color: var(--text); font-size: 15.2px; }
+.action-btn:hover { border: 1px solid var(--accent); }
+.action-btn:disabled { opacity: 0.35; }
+.card-btn { padding: 16px 19.2px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 15.2px; text-align: start; }
+.card-btn:hover { border: 1px solid var(--accent); }
+.stage-btn { padding: 9.6px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; text-align: start; }
+.stage-btn:hover { border: 1px solid var(--accent); }
+.stage-btn:disabled { opacity: 0.4; }
+.stage-mastery { padding: 9.6px 16px; border-radius: 12px; border: 1px solid rgba(232, 182, 76, 0.5); background: var(--panel); color: var(--text); font-size: 16px; text-align: start; }
+.stage-mastery:hover { border: 1px solid var(--accent); }
+.stage-mastery:disabled { opacity: 0.4; }
+.toggle-btn { min-height: 44px; padding: 0; border-radius: 6px; background: rgba(0, 0, 0, 0); color: var(--text); font-size: 14.4px; text-align: start; }
+.check-off { min-width: 22px; min-height: 22px; padding: 0; border-radius: 4px; border: 1px solid var(--text-dim); background: var(--panel-solid); color: var(--ink); font-size: 14px; text-align: center; }
+.check-on { min-width: 22px; min-height: 22px; padding: 0; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: var(--ink); font-size: 14px; font-weight: 700; text-align: center; }

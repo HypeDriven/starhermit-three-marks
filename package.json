@@ -1,13 +1,20 @@
 {
   "name": "three-marks",
+  "version": "1.1.0",
   "private": true,
+  "description": "Three Marks — alignment game on the StarHermit engine",
   "type": "module",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
-    "test:e2e": "node tests/e2e.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "npm run test:unit && npm run test:native",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test:native": "node tests/native.mjs",
+    "test:browser": "node tools/browser-play.mjs .",
+    "plays": "node tools/gen-plays.mjs",
+    "package": "node tools/package-web.mjs",
+    "css": "node tools/css.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.62.1"
-  },
-  "license": "PolyForm-Noncommercial-1.0.0"
+  }
 }

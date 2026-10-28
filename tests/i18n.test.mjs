@@ -10,15 +10,20 @@ import { LESSONS, JOURNEY_STAGES, CHAPTERS, CHALLENGES, THEMES } from '../js/con
 import { ACHIEVEMENTS } from '../js/storage.js';
 
 const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
-const code = readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js') && f !== 'strings.js' && f !== 'gfx-i18n.js')
-  .map((f) => readFileSync(new URL('../js/' + f, import.meta.url), 'utf8')).join('\n');
+const read = (dir, ext) => readdirSync(new URL(dir, import.meta.url)).filter((f) => f.endsWith(ext) && f !== 'strings.js')
+  .map((f) => readFileSync(new URL(dir + f, import.meta.url), 'utf8')).join('\n');
+// the engine client (native/*.ts) draws the strings through T("key")
+const code = read('../js/', '.js') + '\n' + read('../native/', '.ts').replace(/"/g, "'");
 const used = new Set();
-for (const m of code.matchAll(/\b(?:t|tx|lv)\('([A-Za-z0-9]+)'(?!\s*\+)/g)) used.add(m[1]);
+for (const m of code.matchAll(/\b(?:t|T)\('([A-Za-z0-9]+)'(?!\s*\+)/g)) used.add(m[1]);
 // Keys passed through tables / helpers.
 for (const m of code.matchAll(/'((?:bind|mode|dur|players|cam|ai|sync|sc|rec|rs|rule)[A-Z][A-Za-z0-9]*)'/g)) used.add(m[1]);
 for (const m of code.matchAll(/(?:_screenHeader|_ruleCard|openPauseModal)\('([A-Za-z0-9]+)'(?:, '([A-Za-z0-9]+)')?/g)) { used.add(m[1]); if (m[2]) used.add(m[2]); }
 for (const k of ['ruleGoalText', 'ruleTurnsText', 'ruleDrawText', 'ruleVariantsText', 'yes', 'no', 'friendsHosted', 'friendsOffline',
   'matchRestored', 'pausedHidden', 'victory', 'honestDraw', 'defeat', 'lesson', 'match']) used.add(k);
+for (const m of code.matchAll(/HEADERS[^;]*/g)) for (const k of m[0].matchAll(/'([A-Za-z]+)'/g)) used.add(k[1]);
+for (const m of code.matchAll(/MODE_META[^;]*/g)) for (const k of m[0].matchAll(/'([A-Za-z]+[A-Z][A-Za-z]*)'/g)) used.add(k[1]);
+for (const k of ['optionsH', 'optionsNote', 'openOptions', 'bindCameraReset', 'leftHanded', 'confirmMoves', 'timingAssist', 'ruleGoal', 'ruleTurns', 'ruleDraw', 'ruleVariants', 'diffCasualOpt', 'diffSkilledOpt', 'diffExpertOpt', 'board3', 'board4', 'board5', 'seriesSingle', 'seriesBo3', 'seriesBo5', 'sideX', 'sideO', 'difficulty', 'board', 'series', 'side']) used.add(k);
 const vars = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 
 test('ships the nine locales', () => assert.deepEqual(Object.keys(STRINGS).sort(), [...LOCALES].sort()));
