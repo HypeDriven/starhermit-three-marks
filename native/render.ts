@@ -845,7 +845,8 @@ export function applyLook(next: Look): void {
   keyLight.castShadow = next.shadows > 0;
   if (next.shadows > 0) keyLight.shadow.mapSize = next.shadows;
   // high threshold: only glowing marks, win lines and hot highlights bloom
-  renderer.bloom = next.bloom ? { strength: 0.3, radius: 0.4, threshold: 0.92, resolution: next.budget.bloomRes } : null;
+  // r160 page: UnrealBloomPass strength 0.3 → 0.3² at minor 29 (r185 bloom).
+  renderer.bloom = next.bloom ? { strength: 0.3 * 0.3, radius: 0.4, threshold: 0.92, resolution: next.budget.bloomRes } : null;
   renderer.ao = next.ao === "off" ? null : {
     blendIntensity: 0.75, radius: 0.35, distanceExponent: 1.4, thickness: 0.6, scale: 1.0, samples: next.ao === "high" ? 16 : 8,
     resolution: next.budget.aoRes,
@@ -853,6 +854,7 @@ export function applyLook(next: Look): void {
   };
   // GradeShader after OutputPass (display space): a 0.22 S-curve, saturation 1.1, cool shadows / warm
   // highlights by a smoothstep of luma 0.15–0.8, the 0.28 vignette from 0.3 to 0.85 (x stretched 1.1)
+  // Its s * 0.98 + 0.012 lift has no display-space equivalent (levels are linear only): about +3 levels on darks are left out.
   renderer.grade = next.grade ? {
     space: "display", contrast: 0.11, saturation: 1.1, split: [0.15, 0.8], shadows: [0.95, 0.98, 1.05], highlights: [1.05, 1.0, 0.95],
     vignette: { amount: 0.28, inner: 0.3, outer: 0.85, scale: [1.1, 1] },
