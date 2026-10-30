@@ -1,6 +1,6 @@
 # Three Marks — running specification
 
-Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.29.0, host API minor 31), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
+Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.30.0, host API minor 31), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
 
 ## Modes and content
 - **Learn** — five interactive lessons (Making a Mark, Taking Turns, Complete a Line, The Block, The Honest Draw). Every step needs the player's own action, checked through the rules' legality API; a failed step resets.
