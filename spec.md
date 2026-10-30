@@ -1,6 +1,6 @@
 # Three Marks — running specification
 
-Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.27.0, host API minor 29), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
+Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.28.0, host API minor 30), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
 
 ## Modes and content
 - **Learn** — five interactive lessons (Making a Mark, Taking Turns, Complete a Line, The Block, The Honest Draw). Every step needs the player's own action, checked through the rules' legality API; a failed step resets.
@@ -33,7 +33,7 @@ The HUD: objective, turn banner, both clocks on timed rulesets, Pause, the playe
 ## Look and sound
 - The slate on `starhermit:scene` as the three.js r160 page drew it: wooden frame, procedural slate surface and etched grid, sealed-cell plugs, chalk X/O tubes drawn stroke by stroke, win line, ghost, selection and lesson rings, chalk dust and lamp-light motes, desk props, the authored camera with intro swoop and win pulse, fog fitted to the camera.
 - Minor 23 follows three r185 lights and shadows, so the page's own values are used (key 2.6 with its fitted shadow box, bias −0.0005, normal bias 0.015, radius 4; rim 0.7; hemisphere 0.9 / 0.55 with reflections). Reflections: `new RoomEnvironment(renderer)` prefiltered at sigma 0.04, given to each lit material as its envMap with the page's envMapIntensity (r160 scaled scene.environment by each material's intensity; minor 23 scene.environment does not).
-- Graphics follow the runtime's quality tier (native/quality.ts = gfx.js presets and budgets: shadows, GTAO, bloom, the display-space grade and vignette, antialiasing, particles, detail). Bloom strength is the r160 page's 0.3 squared for minor 29's r185 UnrealBloomPass; the grade's small display-space lift is left out. The runtime owns Auto, render scale, frame-rate limit and readout.
+- Graphics follow the runtime's quality tier (native/quality.ts = gfx.js presets and budgets: shadows, GTAO, bloom, the display-space grade and vignette, antialiasing, particles, detail). Bloom is the r160 page's UnrealBloomPass (model "r160", strength 0.3); the grade is the page's S-curve (contrastCurve "s", 0.22) with its 0.98/+0.012 lift as display-space levels. The runtime owns Auto, render scale, frame-rate limit and readout.
 - Sound: the authored one-shots (sfx/*.opus), the per-theme ambience and the adaptive two-sine music pad, rendered into looping clips. The ambience plays on the music bus (the runtime has no ambience bus).
 
 ## Platform
