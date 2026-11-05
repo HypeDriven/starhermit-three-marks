@@ -3,13 +3,12 @@
 // (js/ai.js), the session state machine (js/session.js: series, clocks,
 // undo, lessons, progression and achievements), the content (js/content.js:
 // five themes, five lessons, 40 Journey stages, six challenges, the Daily),
-// the progress document (js/storage.js) and the strings (js/i18n.js).
+// the progress document (js/storage.js).
 import * as rules from "../js/rules.js";
 import * as ai from "../js/ai.js";
 import * as session from "../js/session.js";
 import * as content from "../js/content.js";
 import * as storage from "../js/storage.js";
-import * as i18n from "../js/i18n.js";
 
 export interface Config {
   boardSize: number; winLength: number; moveLimit: number; timeLimitMs: number; disabledCells: number[];
@@ -103,12 +102,3 @@ interface StorageApi {
   sameProgress(a: unknown, b: unknown): boolean;
 }
 export const St = storage as unknown as StorageApi;
-type Vars = Record<string, string | number>;
-interface I18nApi {
-  t(key: string, vars?: Vars): string; tn(group: string, id: string | number, fallback?: unknown): unknown; setLocale(tag: string): string; locale(): string;
-  stageName(s: Stage): string; stageBlurb(s: Stage): string; chapterName(i: number, fb: string): string;
-  lessonText(l: { id?: string }, field: string, fb: unknown): string; challengeText(c: Challenge, i: number, fb: string): string;
-  themeName(t: Theme): string; rulesetName(n: string): string; achievementText(a: { key: string; name: string; desc: string }, i: number): string;
-  aiName(id: string): string; playerName(n: string): string; scoreLabel(l: string): string;
-}
-export const L = i18n as unknown as I18nApi;

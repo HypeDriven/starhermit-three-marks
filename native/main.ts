@@ -18,17 +18,17 @@
 // (countdown, the AI's thinking pause, clocks, round ends) run on a clock
 // advanced 1000/60 ms per fixed step, so matches replay exactly; the
 // session's "platform time" is the platform clock at start plus that clock.
-import { clipboard, frame, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
+import { afterRender, clipboard, frame, levelSettings, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
 import { bindings, onAction, onPointerButton, onPointerMove, onTouch, vibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { onSessionEnded, requestSignIn } from "starhermit:platform";
 import {
-  A, C, GameSession, L, PHASE, R, type AI, type Challenge, type Lesson, type LessonInfo, type MatchOptions, type MatchResult, type Session,
+  A, C, GameSession, PHASE, R, type AI, type Challenge, type Lesson, type LessonInfo, type MatchOptions, type MatchResult, type Session,
   type Stage, type State, type Theme, type Timers,
 } from "./game.ts";
 import * as aiWorker from "./ai.ts";
 import * as audio from "./audio.ts";
-import { S, T } from "./i18n.ts";
+import { L, S, T } from "./i18n.ts";
 import * as platform from "./platform.ts";
 import { lookFor } from "./quality.ts";
 import * as render from "./render.ts";
@@ -107,9 +107,8 @@ export function toast(text: string, warn = false): void {
   if (app.toasts.length > 3) app.toasts.shift();
   if (warn) announce(text);
 }
-const pending: (() => void)[] = [];
 /** A widget's press, run once the frame's UI is built. */
-export function later(fn: () => void): void { pending.push(fn); }
+export function later(fn: () => void): void { afterRender(fn); }
 export function click(fn: () => void): () => void { return () => { audio.play("uiTick"); fn(); }; }
 export const reducedMotion = (): boolean => preferences().reducedMotion;
 export function themeFor(id: string): Theme { return C.themeById(id); }
@@ -516,8 +515,8 @@ session.on("lesson-complete", ({ lesson, achievementsUnlocked }: { lesson: Lesso
 session.on("undo", () => { announce(T("undoneTurn")); render.skipAnimations(); });
 session.on("phase", ({ phase }: { phase: string }) => { if (phase === PHASE.COUNTDOWN) render.skipAnimations(); });
 export function lessonStepText(info: LessonInfo): string {
-  const steps = L.lessonText({ id: session.lesson?.def.id }, "steps", null) as unknown as string[] | null;
-  return steps?.[info.stepIndex] || info.step.text;
+  const id = session.lesson?.def.id;
+  return id ? L.lessonStep(id, info.stepIndex, info.step.text) : info.step.text;
 }
 function openResults(result: MatchResult): void {
   const won = result.outcome === "win";
@@ -535,8 +534,8 @@ function openResults(result: MatchResult): void {
 export function lbLine(): string | null {
   const lb = app.lb;
   if (!lb) return null;
-  if (lb === "posting") return S("lbPosting");
-  return !lb.posted ? S("lbNotPosted") : lb.rank ? S("lbRank", { rank: lb.rank }) : S("lbPosted");
+  if (lb === "posting") return S("leaderboardPosting");
+  return !lb.posted ? S("leaderboardNotPosted") : lb.rank ? S("leaderboardRank", { rank: lb.rank }) : S("leaderboardPosted");
 }
 
 // ------------------------------------------------------------------ keys and pads (ui.js _onKey, _pollGamepad)
@@ -625,7 +624,7 @@ export function signIn(): void { void requestSignIn().catch(() => undefined); }
 export function invite(): void {
   const link = platform.inviteLink();
   if (!link) return;
-  try { clipboard.writeText(link); toast(S("copied")); } catch { toast(S("copyFail", { url: link })); }
+  try { clipboard.writeText(link); toast(S("inviteCopied")); } catch { toast(`${S("inviteFailed")}: ${link}`); }
 }
 
 // ------------------------------------------------------------------ the clock
@@ -639,11 +638,10 @@ onFixedUpdate(() => {
 // ------------------------------------------------------------------ boot and lifecycle
 let lookKey = "";
 function applyLook(): void {
-  const f = frame();
-  const k = `${f.quality}:${f.levelIndex}`;
-  if (k === lookKey) return;
-  lookKey = k;
-  render.applyLook(lookFor(f.quality, f.levelIndex));
+  const level = frame().level;
+  if (level === lookKey) return;
+  lookKey = level;
+  render.applyLook(lookFor(levelSettings(level)));
 }
 let optionKey = "";
 function applyOptions(): void {
@@ -697,9 +695,11 @@ onUpdate((dt) => {
 onRender(() => {
   const wasPlaying = inPlay();
   drawScreens();
-  for (const fn of pending.splice(0)) fn();
-  pointerInput(wasPlaying);
-  const f = frame();
-  render.frame(frameDt, f.width, f.height);
-  flushAnnouncements();
+  // queued after this frame's presses (later), so they act on this frame's scene
+  afterRender(() => {
+    pointerInput(wasPlaying);
+    const f = frame();
+    render.frame(frameDt, f.width, f.height);
+    flushAnnouncements();
+  });
 });

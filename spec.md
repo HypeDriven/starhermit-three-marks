@@ -40,7 +40,7 @@ The HUD: objective, turn banner, both clocks on timed rulesets, Pause, the playe
 - Save: the sealed progression document (js/storage.js) as the engine save (schema 1, device + cloud); conflicts merge with mergeProgression; the browser build's cloud slot (game:<slug>) is merged in once as a foreign save. The interrupted-match snapshot stays on the device.
 - The game's options are engine settings; the browser build's settings KV values (theme, camera, palette, left-handed, confirm moves, timing assist) are adopted once and the old keys removed. Volumes, graphics, language, key/pad bindings, reduced motion, high contrast, text size and vibration are the runtime's Options.
 - Leaderboard: signed in, unassisted Journey, Daily and Challenge matches post their total through score-script.js (range-checked, `high-score`), and the results show the rank.
-- Strings in nine locales (js/strings.js), following the runtime's interface language.
+- Strings in nine locales (assets/strings.json), following the runtime's interface language.
 - server.js is the browser build's unused sandbox host-contract script; it is not the manifest's server and not packaged.
 
 ## Checks

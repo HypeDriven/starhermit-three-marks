@@ -13,8 +13,8 @@
 // media queries are layouts picked by the window's logical size.
 import { frame, openMenu } from "starhermit:engine";
 import * as ui from "starhermit:ui";
-import { C, L, PHASE, St, type Challenge, type Lesson, type MatchResult, type Stage } from "./game.ts";
-import { S, T, locale } from "./i18n.ts";
+import { C, PHASE, St, type Challenge, type Lesson, type MatchResult, type Stage } from "./game.ts";
+import { L, S, T, locale } from "./i18n.ts";
 import * as platform from "./platform.ts";
 import * as render from "./render.ts";
 import {
@@ -26,11 +26,9 @@ import {
 // ------------------------------------------------------------------ layout helpers
 interface Layout { lw: number; lh: number; sc: number; ox: number; oy: number; wide: boolean; portrait: boolean; short: boolean }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = Math.max(1, (f.width - sa.left - sa.right) / sc), lh = Math.max(1, (f.height - sa.top - sa.bottom) / sc);
-  return { lw, lh, sc, ox: sa.left, oy: sa.top, wide: lw >= 1024, portrait: lw <= 700 && lh >= lw, short: lh <= 480 && lw > lh };
+  const v = ui.viewport!();
+  const lw = Math.max(1, v.width), lh = Math.max(1, v.height);
+  return { lw, lh, sc: v.scale, ox: v.x, oy: v.y, wide: lw >= 1024, portrait: lw <= 700 && lh >= lw, short: lh <= 480 && lw > lh };
 }
 function tw(text: string, style: string, kind?: "button" | "heading"): number {
   return ui.measureText(text, { ...(kind ? { kind } : {}), style: [style] }).width / ui.preferences().scale;
@@ -42,12 +40,6 @@ function para(text: string, width: number, cls = "text", id?: string): void {
   if (id) u = u.id(id);
   if (tw(text, cls) <= width) u.label(text);
   else u.paragraph(text, Math.max(20, width));
-}
-function ellipsize(text: string, cls: string, width: number): string {
-  if (tw(text, cls) <= width) return text;
-  let s = text;
-  while (s.length > 1 && tw(s + "…", cls) > width) s = s.slice(0, -1);
-  return s.trimEnd() + "…";
 }
 interface Btn {
   id: string; text: string; style?: string; act: () => void; disabled?: boolean; name?: string; width?: number; height?: number;
@@ -76,18 +68,7 @@ function button(b: Btn): void {
 }
 /** Buttons at their own widths in rows wrapping at `width` (flex-wrap). */
 function flow(label: string, list: Btn[], width: number, gap = 11.2, justify: "start" | "center" = "start"): void {
-  const rows: Btn[][] = [[]];
-  let used = 0;
-  const bw = (b: Btn): number => Math.min(width, b.width ?? btnWidth(b));
-  for (const b of list) {
-    const w = bw(b);
-    if (rows[rows.length - 1]!.length && used + gap + w > width) { rows.push([]); used = 0; }
-    used += (rows[rows.length - 1]!.length ? gap : 0) + w;
-    rows[rows.length - 1]!.push(b);
-  }
-  ui.column(label, () => {
-    rows.forEach((row, ri) => ui.row(`${label}-r${ri}`, () => { for (const b of row) button({ ...b, width: bw(b) }); }, { spacing: gap, width, justify, align: "center" }));
-  }, { spacing: gap, width });
+  ui.row(label, () => { for (const b of list) button({ ...b, width: Math.min(width, b.width ?? btnWidth(b)) }); }, { wrap: true, width, gap, justify, align: "center" });
 }
 /** CSS grid repeat(auto-fit, minmax(min, 1fr)): items in equal columns. */
 function gridOf<T>(label: string, items: T[], width: number, min: number, gap: number, cell: (item: T, w: number, i: number) => void): void {
@@ -150,7 +131,7 @@ function hud(L0: Layout): void {
   const syncW = tw(syncWord, syncCls) + 1;
   const fixed = (): number => bannerW + 44 + (clockW ? clockW + gap : 0) + (nameW ? nameW + gap : 0) + syncW + gap * 2;
   const pill = (id: string, cls: string, textCls: string, text: string, w: number, justify: "center" | "start" = "center"): void => {
-    ui.row(id, () => ui.style(textCls).label(ellipsize(text, textCls, w - 30)), { style: cls, width: w, justify, align: "center" });
+    ui.row(id, () => ui.style(textCls, { width: Math.min(tw(text, textCls) + 1, w - 30), text: { overflow: "ellipsis" } }).label(text), { style: cls, width: w, justify, align: "center" });
   };
   const pauseBtn = (): void => {
     if (ui.style("icon-btn", { width: 44, height: 44 }).id("btn-pause").button(T("pause"), { content: () => ui.style("btn-label-c").label("II") }) && fresh()) later(click(pauseGame));
@@ -483,7 +464,7 @@ function helpScreen(W: number): void {
     ui.row(`bind-${action}`, () => {
       const kb = keysFor(action);
       const kw = tw(kb, "kbd-text") + 18;
-      ui.style("dim", { width: Math.max(40, w - kw - 12) }).label(ellipsize(T(key), "dim", Math.max(40, w - kw - 12)));
+      ui.style("dim", { width: Math.max(40, w - kw - 12), text: { overflow: "ellipsis" } }).label(T(key));
       ui.row(`kbd-${action}`, () => ui.style("kbd-text").label(kb), { style: "kbd" });
     }, { width: w, spacing: 12, align: "center", justify: "space-between" });
   });
@@ -595,7 +576,7 @@ function factRows(rows: [string, string][], iw: number): void {
   const kw = Math.min(iw * 0.4, Math.max(...rows.map(([k]) => tw(k, "small"))) + 8);
   ui.column("facts", () => {
     rows.forEach(([k, v], i) => ui.row(`fact-${i}`, () => {
-      ui.style("small", { width: kw }).label(ellipsize(k, "small", kw));
+      ui.style("small", { width: kw, text: { overflow: "ellipsis" } }).label(k);
       ui.column(`fact-v-${i}`, () => para(v, iw - kw - 10, "td"), { width: iw - kw - 10 });
     }, { width: iw, spacing: 10 }));
   }, { width: iw, spacing: 6.4 });

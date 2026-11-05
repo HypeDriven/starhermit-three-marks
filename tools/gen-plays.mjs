@@ -6,14 +6,13 @@
 // a lesson step asks for) replay exactly on the runtime. The scripts click
 // (desktop) or touch (phone) the board mirror's named cells and wait for the
 // turn banner between moves. Run after content or AI changes: node tools/gen-plays.mjs
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { GameSession, PHASE } from '../js/session.js';
 import { Store } from '../js/storage.js';
 import { JOURNEY_STAGES, LESSONS } from '../js/content.js';
 import { PracticeAI } from '../js/ai.js';
-import { STRINGS } from '../js/strings.js';
 
-const en = STRINGS['en-US'];
+const en = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'))['en-US'];
 const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
 function fakeTimers() {
   const list = []; let id = 1;

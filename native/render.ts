@@ -30,7 +30,7 @@
 // grade / antialias. Graphics follow the runtime's quality tier
 // (native/quality.ts: gfx.js's presets and budgets).
 import {
-  ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, CircleGeometry,
+  ParticleEmitter, ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, CircleGeometry,
   Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry, Fog, Group, HemisphereLight, MathUtils, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PMREMGenerator, Plane, Points,
   PointsMaterial, Raycaster, RepeatWrapping, RoomEnvironment, Shape, SRGBColorSpace, TorusGeometry, TubeGeometry, Vector2, Vector3,
@@ -282,7 +282,7 @@ interface Anim { dur: number; t: number; delay?: number; update: (k: number) => 
 interface BoardView {
   objects: Object3D[]; boardGroup: Group; selection: Mesh; highlights: Group; marks: Map<number, MarkEntry>;
   ghost: Group | null; winLine: Mesh | null; winCells: number[] | null; winPlayer: number;
-  dust: { cap: number; pos: Float32Array; vel: Float32Array; life: Float32Array; geo: BufferGeometry; points: Points; rng: Rng };
+  dust: [ParticleEmitter, ParticleEmitter];
   motes: { pts: Points; pos: Float32Array; seed: Float32Array; count: number } | null; grain: Texture | null;
 }
 let view: BoardView | null = null;
@@ -379,6 +379,7 @@ function dispose(obj: Object3D): void {
 }
 function clearView(): void {
   if (!view) return;
+  for (const e of view.dust) e.dispose();
   for (const o of view.objects) { scene.remove(o); dispose(o); }
   view = null;
   anims.length = 0;
@@ -519,17 +520,17 @@ function build(): void {
   selection.visible = false;
   boardGroup.add(selection);
   // chalk dust (pooled)
-  const cap = particleBudget(q).pool;
-  const dustPos = new Float32Array(cap * 3);
-  for (let i = 0; i < cap; i++) dustPos[i * 3 + 1] = -10;
-  const dustGeo = new BufferGeometry();
-  dustGeo.setAttribute("position", new BufferAttribute(dustPos, 3));
-  const dustPoints = new Points(dustGeo, new PointsMaterial({
-    color: new Color(th.markA), size: 0.04, transparent: true, opacity: 0.75, depthWrite: false, sizeAttenuation: true, map: dotTexture(),
-  }));
-  dustPoints.frustumCulled = false;
-  scene.add(dustPoints);
-  objects.push(dustPoints);
+  const dust = [0x57, 0xd0].map((seed) => {
+    const e = new ParticleEmitter({
+      capacity: particleBudget(q).pool, seed: (visualSeed ^ seed) >>> 0, space: "world", shape: "box", extent: [0.12, 0, 0.12],
+      material: new PointsMaterial({ size: 0.04, transparent: true, opacity: 0.75, depthWrite: false, sizeAttenuation: true, map: dotTexture() }),
+      velocity: [0, 0.525, 0], velocitySpread: [0.25, 0.275, 0.25], gravity: [0, -1.6, 0], life: [0.4, 0.9],
+    });
+    e.frustumCulled = false;
+    scene.add(e);
+    objects.push(e);
+    return e;
+  }) as [ParticleEmitter, ParticleEmitter];
   // lamp-light motes (particles high)
   let motes: BoardView["motes"] = null;
   const count = particleBudget(q).motes;
@@ -554,7 +555,7 @@ function build(): void {
   }
   view = {
     objects, boardGroup, selection, highlights, marks: new Map(), ghost: null, winLine: null, winCells: null, winPlayer: 0, grain,
-    dust: { cap, pos: dustPos, vel: new Float32Array(cap * 3), life: new Float32Array(cap), geo: dustGeo, points: dustPoints, rng: rngOf(visualSeed ^ 0xd057) },
+    dust,
     motes,
   };
   envTex = keepEnv;
@@ -580,23 +581,10 @@ function placeMark(cell: number, player: number, instant: boolean): void {
   });
 }
 function spawnDust(x: number, z: number, player: number): void {
-  const d = view!.dust;
-  const count = particleBudget(look!).dustPerMark;
   const colors = markColors();
-  (d.points.material as PointsMaterial).color = new Color(player === 1 ? colors.a : colors.b);
-  for (let n = 0; n < count; n++) {
-    let slot = -1;
-    for (let i = 0; i < d.cap; i++) if (d.life[i]! <= 0) { slot = i; break; }
-    if (slot < 0) break;
-    const i3 = slot * 3;
-    d.pos[i3] = x + d.rng.range(-0.12, 0.12);
-    d.pos[i3 + 1] = 0.06;
-    d.pos[i3 + 2] = z + d.rng.range(-0.12, 0.12);
-    d.vel[i3] = d.rng.range(-0.25, 0.25);
-    d.vel[i3 + 1] = d.rng.range(0.25, 0.8);
-    d.vel[i3 + 2] = d.rng.range(-0.25, 0.25);
-    d.life[slot] = d.rng.range(0.4, 0.9);
-  }
+  const e = view!.dust[player === 1 ? 0 : 1];
+  e.set({ color: new Color(player === 1 ? colors.a : colors.b) });
+  e.burst(particleBudget(look!).dustPerMark, [x, 0.06, z]);
 }
 /** render.js syncState: reconcile the marks with a rules snapshot; the win line or the draw pulse at the end. */
 export function syncState(state: State, instant = false): void {
@@ -685,9 +673,7 @@ export function skipAnimations(): void {
   v.boardGroup.scale.setScalar(1);
   for (const { group } of v.marks.values()) for (const s of strokesOf(group)) s.mesh.geometry.setDrawRange(0, Infinity);
   if (v.winLine) v.winLine.geometry.setDrawRange(0, Infinity);
-  v.dust.life.fill(0);
-  for (let i = 0; i < v.dust.cap; i++) v.dust.pos[i * 3 + 1] = -10;
-  (v.dust.geo.attributes.position as BufferAttribute).needsUpdate = true;
+  for (const e of v.dust) e.clear();
 }
 /** The ghost mark under the pointer (danger coloured when illegal); null clears it. */
 export function setHover(cell: number | null, legal = true): void {
@@ -846,11 +832,12 @@ export function applyLook(next: Look): void {
   if (next.shadows > 0) keyLight.shadow.mapSize = next.shadows;
   // high threshold: only glowing marks, win lines and hot highlights bloom
   // r160 page: its UnrealBloomPass exactly (model "r160", strength 0.3 as written).
-  renderer.bloom = next.bloom ? { model: "r160", strength: 0.3, radius: 0.4, threshold: 0.92, resolution: next.budget.bloomRes } : null;
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: 0.75, radius: 0.35, distanceExponent: 1.4, thickness: 0.6, scale: 1.0, samples: next.ao === "high" ? 16 : 8,
-    resolution: next.budget.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8 },
+  renderer.bloom = next.bloom === null ? null : { model: "r160", strength: 0.3, radius: 0.4, threshold: 0.92, resolution: next.bloom };
+  const full = !!next.ao && next.ao.resolution >= 1; // the engine's "high": full-resolution AO
+  renderer.ao = !next.ao ? null : {
+    blendIntensity: 0.75, radius: 0.35, distanceExponent: 1.4, thickness: 0.6, scale: 1.0, samples: next.ao.samples,
+    resolution: next.ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: full ? 6 : 4, rings: 2, samples: next.ao.denoiseSamples },
   };
   // GradeShader after OutputPass (display space): a 0.22 S-curve, saturation 1.1, cool shadows / warm
   // highlights by a smoothstep of luma 0.15–0.8, the s * 0.98 + 0.012 lift (levels), the 0.28 vignette
@@ -900,20 +887,6 @@ export function frame(dt: number, w: number, h: number): void {
     const o = 0.55 + Math.sin(now * 0.005) * 0.3;
     for (const ring of v.highlights.children) ((ring as Mesh).material as MeshBasicMaterial).opacity = o;
   }
-  const d = v.dust;
-  let any = false;
-  for (let i = 0; i < d.cap; i++) {
-    if (d.life[i]! <= 0) continue;
-    any = true;
-    d.life[i] = d.life[i]! - dt;
-    const i3 = i * 3;
-    if (d.life[i]! <= 0) { d.pos[i3 + 1] = -10; continue; }
-    d.vel[i3 + 1] = d.vel[i3 + 1]! - 1.6 * dt;
-    d.pos[i3] = d.pos[i3]! + d.vel[i3]! * dt;
-    d.pos[i3 + 1] = d.pos[i3 + 1]! + d.vel[i3 + 1]! * dt;
-    d.pos[i3 + 2] = d.pos[i3 + 2]! + d.vel[i3 + 2]! * dt;
-  }
-  if (any) (d.geo.attributes.position as BufferAttribute).needsUpdate = true;
   const m = v.motes;
   if (m && !reduced) {
     const t = now * 0.001;

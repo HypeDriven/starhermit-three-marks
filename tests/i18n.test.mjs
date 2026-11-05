@@ -5,10 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS } from '../js/strings.js';
 import { LESSONS, JOURNEY_STAGES, CHAPTERS, CHALLENGES, THEMES } from '../js/content.js';
 import { ACHIEVEMENTS } from '../js/storage.js';
 
+const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
 const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
 const read = (dir, ext) => readdirSync(new URL(dir, import.meta.url)).filter((f) => f.endsWith(ext) && f !== 'strings.js')
   .map((f) => readFileSync(new URL(dir + f, import.meta.url), 'utf8')).join('\n');
@@ -36,24 +36,24 @@ for (const loc of LOCALES) {
   });
   test(`${loc}: every content entry`, () => {
     const L = STRINGS[loc];
-    for (const st of JOURNEY_STAGES) assert.equal(L.stages[st.index].length, 2, `stage ${st.index}`);
-    CHAPTERS.forEach((c, i) => assert.ok(L.chapters[i], `chapter ${i}`));
+    for (const st of JOURNEY_STAGES) assert.ok(L[`stages.${st.index}.0`] && L[`stages.${st.index}.1`], `stage ${st.index}`);
+    CHAPTERS.forEach((c, i) => assert.ok(L[`chapters.${i}`], `chapter ${i}`));
     for (const l of LESSONS) {
-      assert.ok(L.lessons[l.id].name && L.lessons[l.id].intro, `lesson ${l.id}`);
-      assert.equal(L.lessons[l.id].steps.length, l.steps.length, `lesson steps ${l.id}`);
+      assert.ok(L[`lessons.${l.id}.name`] && L[`lessons.${l.id}.intro`], `lesson ${l.id}`);
+      l.steps.forEach((_, i) => assert.ok(L[`lessons.${l.id}.steps.${i}`], `lesson steps ${l.id}`));
     }
-    for (const c of CHALLENGES) assert.equal(L.challengeList[c.id].length, 3, `challenge ${c.id}`);
-    for (const th of THEMES) assert.ok(L.themes[th.id], `theme ${th.id}`);
-    for (const r of ['Classic', 'Wide Lines', 'Blitz', 'Misère', 'Hollow']) assert.ok(L.rulesets[r], `ruleset ${r}`);
-    for (const a of ACHIEVEMENTS) assert.equal(L.achievementsList[a.key].length, 2, `achievement ${a.key}`);
+    for (const c of CHALLENGES) for (const i of [0, 1, 2]) assert.ok(L[`challengeList.${c.id}.${i}`], `challenge ${c.id}`);
+    for (const th of THEMES) assert.ok(L[`themes.${th.id}`], `theme ${th.id}`);
+    for (const r of ['Classic', 'Wide Lines', 'Blitz', 'Misère', 'Hollow']) assert.ok(L[`rulesets.${r}`], `ruleset ${r}`);
+    for (const a of ACHIEVEMENTS) for (const i of [0, 1]) assert.ok(L[`achievementsList.${a.key}.${i}`], `achievement ${a.key}`);
   });
 }
 test('English content strings match the authored data', () => {
   const en = STRINGS['en-US'];
-  for (const st of JOURNEY_STAGES) assert.deepEqual(en.stages[st.index], [st.name, st.blurb]);
-  for (const l of LESSONS) assert.deepEqual(en.lessons[l.id].steps, l.steps.map((s) => s.text));
-  for (const c of CHALLENGES) assert.deepEqual(en.challengeList[c.id], [c.name, c.blurb, c.goalText]);
-  for (const a of ACHIEVEMENTS) assert.deepEqual(en.achievementsList[a.key], [a.name, a.desc]);
+  for (const st of JOURNEY_STAGES) assert.deepEqual([en[`stages.${st.index}.0`], en[`stages.${st.index}.1`]], [st.name, st.blurb]);
+  for (const l of LESSONS) l.steps.forEach((step, i) => assert.equal(en[`lessons.${l.id}.steps.${i}`], step.text));
+  for (const c of CHALLENGES) assert.deepEqual([0, 1, 2].map((i) => en[`challengeList.${c.id}.${i}`]), [c.name, c.blurb, c.goalText]);
+  for (const a of ACHIEVEMENTS) assert.deepEqual([0, 1].map((i) => en[`achievementsList.${a.key}.${i}`]), [a.name, a.desc]);
 });
 test('non-English locales are translated', () => {
   for (const loc of LOCALES.filter((l) => !l.startsWith('en'))) {
