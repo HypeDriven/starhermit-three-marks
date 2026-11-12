@@ -1,3 +1,10 @@
+import { readFileSync as readReviewedIdentityData } from 'node:fs';
+const REVIEWED_IDENTITIES = JSON.parse(readReviewedIdentityData(new URL('./reviewed-identities.json', import.meta.url), 'utf8'));
+// Only exact reviewed key/source pairs are exempt; all other English copies count.
+function isReviewedIdentity(locale, key, source) {
+  const row = REVIEWED_IDENTITIES.locales[locale]?.[key];
+  return row?.source === source && typeof row.reason === 'string' && row.reason.length > 0;
+}
 // i18n.test.mjs — every string key used in js/*.js exists in all nine
 // locales with the same {placeholders} as US English, and every content
 // entry (stages, chapters, lessons and steps, challenges, daily rulesets,
@@ -9,7 +16,7 @@ import { LESSONS, JOURNEY_STAGES, CHAPTERS, CHALLENGES, THEMES } from '../js/con
 import { ACHIEVEMENTS } from '../js/storage.js';
 
 const STRINGS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
-const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
+const LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT', 'fr-BE', 'de-BE', 'en-SG', 'en-HK', 'en-BQ', 'es-CO', 'de-IT', 'fr-IT', 'es-CL', 'es-AR', 'es-EC', 'nl-BE', 'de-BR', 'zh-SG', 'ms-SG', 'nl-NL', 'fi-FI', 'sv-FI', 'id-ID', 'vi-VN', 'ja-JP', 'ta-SG', 'zh-HK', 'yue-HK', 'et-EE', 'ru-FI', 'ru-EE', 'da-DE', 'lb-BE', 'co-FR', 'eu-FR', 'ca-FR', 'oc-FR', 'sl-IT', 'fur-IT', 'ca-IT', 'oc-IT', 'ca-ES', 'eu-ES', 'gl-ES', 'su-ID', 'bew-ID', 'km-VN'];
 const read = (dir, ext) => readdirSync(new URL(dir, import.meta.url)).filter((f) => f.endsWith(ext) && f !== 'strings.js')
   .map((f) => readFileSync(new URL(dir + f, import.meta.url), 'utf8')).join('\n');
 // the engine client (native/*.ts) draws the strings through T("key")
@@ -57,7 +64,7 @@ test('English content strings match the authored data', () => {
 });
 test('non-English locales are translated', () => {
   for (const loc of LOCALES.filter((l) => !l.startsWith('en'))) {
-    const same = [...used].filter((k) => STRINGS[loc][k] === STRINGS['en-US'][k] && !/^(~|—|\d)/.test(STRINGS['en-US'][k]));
+    const same = ([...used].filter((k) => STRINGS[loc][k] === STRINGS['en-US'][k] && !/^(~|—|\d)/.test(STRINGS['en-US'][k]))).filter((key) => !isReviewedIdentity(loc, key, STRINGS['en-US'][key]));
     assert.ok(same.length < 16, `${loc}: ${same.join(', ')}`); // cognates such as Pause, Audio, Standard, Par
   }
 });

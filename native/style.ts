@@ -1,3 +1,5 @@
+// localization-runtime:attached
+import { setLocalizedDefaultFont as __l10nSetFont, setLocalizedStyles as __l10nStyles } from "./l10n/font.ts";
 // The look of the HUD, rails, screens, sheets and toasts: the browser build's
 // css/style.css, rewritten class-based in tools/ui-style.css and converted
 // once with `starhermit css` into assets/ui-style.json (`npm run css`),
@@ -22,7 +24,7 @@ let css: ui.CssStyles | null = null;
 let key = "";
 export function initStyles(): void {
   css = files.readJson("assets/ui-style.json") as unknown as ui.CssStyles;
-  ui.setFont({ family: "sans-serif" });
+  __l10nSetFont({ family: "sans-serif" });
   ui.setTheme({
     fontSize: 16, smallSize: 13.6, headingSize: 24, padding: 8, spacing: 8, radius: 10,
     text: BASE.text!, muted: BASE["text-dim"]!, panel: "#161922", control: "#1f2330", hovered: "#2a2f3d",
@@ -38,7 +40,7 @@ export function applyTokens(highContrast: boolean): void {
   key = k;
   current = { ...BASE, ...(highContrast ? CONTRAST : {}) };
   ui.setTokens({ ...css.tokens, ...current });
-  ui.setStyles({
+  __l10nStyles({
     ...css.styles,
     label: { text: { color: "$text" } },
     paragraph: { text: { color: "$text" } },

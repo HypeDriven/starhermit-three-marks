@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Three Marks on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The rules (js/rules.js), the practice AI
@@ -692,7 +693,7 @@ onUpdate((dt) => {
   audio.update();
   app.toasts = app.toasts.filter((t) => t.until > clockMs);
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   const wasPlaying = inPlay();
   drawScreens();
   // queued after this frame's presses (later), so they act on this frame's scene
@@ -702,4 +703,8 @@ onRender(() => {
     render.frame(frameDt, f.width, f.height);
     flushAnnouncements();
   });
-});
+}));
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);
