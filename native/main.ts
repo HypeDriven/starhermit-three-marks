@@ -60,7 +60,6 @@ export const app = {
   lastMatch: null as MatchOptions | null,
   lastClock: null as { player: number; remainingMs: number } | null,
   lb: null as Lb,
-  toasts: [] as { text: string; warn: boolean; until: number }[],
   /** Practice setup (the four selects' indexes). */
   practice: { difficulty: 1, board: 0, series: 0, side: 0 },
 };
@@ -102,11 +101,13 @@ function flushAnnouncements(): void {
   const text = spoken.splice(0).slice(-3).join(" ").slice(0, 400);
   try { ui.announce(text); } catch { /* busy */ }
 }
-/** ui.js toast (2.6 s; warnings red-edged, also announced). */
+/** Native toast stack (2.6 s; warnings red-edged, also announced). */
 export function toast(text: string, warn = false): void {
-  app.toasts.push({ text, warn, until: clockMs + 2600 });
-  if (app.toasts.length > 3) app.toasts.shift();
-  if (warn) announce(text);
+  ui.toast!(text, {
+    kind: warn ? "warning" : "info", duration: 2.6, announce: warn,
+    offset: app.playing ? 84 : 20,
+    style: [warn ? "toast-warn" : "toast", warn ? "toast-warn-text" : "toast-text"],
+  });
 }
 /** A widget's press, run once the frame's UI is built. */
 export function later(fn: () => void): void { afterRender(fn); }
@@ -691,7 +692,6 @@ onUpdate((dt) => {
   applyLook();
   applyTokens(ui.preferences().highContrast);
   audio.update();
-  app.toasts = app.toasts.filter((t) => t.until > clockMs);
 });
 onRender(__l10nRender(() => {
   const wasPlaying = inPlay();

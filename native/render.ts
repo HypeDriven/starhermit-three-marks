@@ -30,12 +30,13 @@
 // grade / antialias. Graphics follow the runtime's quality tier
 // (native/quality.ts: gfx.js's presets and budgets).
 import {
-  ParticleEmitter, ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, CircleGeometry,
+  ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, CircleGeometry,
   Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry, Fog, Group, HemisphereLight, MathUtils, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, MeshPhysicalMaterial, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PMREMGenerator, Plane, Points,
   PointsMaterial, Raycaster, RepeatWrapping, RoomEnvironment, Shape, SRGBColorSpace, TorusGeometry, TubeGeometry, Vector2, Vector3,
   pointerToNdc, renderer, scene, type Material, type Object3D, type Texture,
 } from "starhermit:scene";
+import { GPUParticleEmitter } from "starhermit:particles";
 import { OffscreenCanvas, type OffscreenCanvasRenderingContext2D } from "starhermit:canvas";
 import type { Config, State, Theme } from "./game.ts";
 import { particleBudget, type Look } from "./quality.ts";
@@ -282,7 +283,7 @@ interface Anim { dur: number; t: number; delay?: number; update: (k: number) => 
 interface BoardView {
   objects: Object3D[]; boardGroup: Group; selection: Mesh; highlights: Group; marks: Map<number, MarkEntry>;
   ghost: Group | null; winLine: Mesh | null; winCells: number[] | null; winPlayer: number;
-  dust: [ParticleEmitter, ParticleEmitter];
+  dust: [GPUParticleEmitter, GPUParticleEmitter];
   motes: { pts: Points; pos: Float32Array; seed: Float32Array; count: number } | null; grain: Texture | null;
 }
 let view: BoardView | null = null;
@@ -428,6 +429,7 @@ function build(): void {
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -FRAMING.boardThickness - 0.02;
   ground.receiveShadow = true;
+  ground.movable = false;
   scene.add(ground);
   objects.push(ground);
 
@@ -509,6 +511,7 @@ function build(): void {
     eraser.position.set(-2.2, groundY + 0.07, -1.1);
     eraser.rotation.y = rng.range(-0.5, 0.5);
     for (const p of [s1, s2, eraser]) { p.castShadow = true; props.add(p); }
+    props.movable = false;
     scene.add(props);
     objects.push(props);
   }
@@ -521,7 +524,7 @@ function build(): void {
   boardGroup.add(selection);
   // chalk dust (pooled)
   const dust = [0x57, 0xd0].map((seed) => {
-    const e = new ParticleEmitter({
+    const e = new GPUParticleEmitter({
       capacity: particleBudget(q).pool, seed: (visualSeed ^ seed) >>> 0, space: "world", shape: "box", extent: [0.12, 0, 0.12],
       material: new PointsMaterial({ size: 0.04, transparent: true, opacity: 0.75, depthWrite: false, sizeAttenuation: true, map: dotTexture() }),
       velocity: [0, 0.525, 0], velocitySpread: [0.25, 0.275, 0.25], gravity: [0, -1.6, 0], life: [0.4, 0.9],
@@ -530,7 +533,7 @@ function build(): void {
     scene.add(e);
     objects.push(e);
     return e;
-  }) as [ParticleEmitter, ParticleEmitter];
+  }) as [GPUParticleEmitter, GPUParticleEmitter];
   // lamp-light motes (particles high)
   let motes: BoardView["motes"] = null;
   const count = particleBudget(q).motes;

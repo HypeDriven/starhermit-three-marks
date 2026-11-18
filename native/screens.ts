@@ -114,7 +114,6 @@ export function drawScreens(): void {
   if (inPlay()) boardMirror();
   if (app.screen !== "none") screen(L0);
   if (app.sheet) sheet(L0);
-  toasts(L0);
   if (app.focusNext) {
     const age = f.frame - app.openedFrame;
     if (age >= 1) ui.setFocus(app.focusNext);
@@ -256,8 +255,11 @@ function screen(L0: Layout): void {
   const area = ui.scrollArea("screen-scroll", { width: L0.lw, height: L0.lh }, () => {
     ui.column("screen-col", () => {
       const s = app.screen;
-      if (s === "title") titleScreen(L0, W);
-      else {
+      if (s === "title") {
+        const daily = C.dailyFor(new Date(platform.nowMs())).id;
+        const version = JSON.stringify([L0, W, daily, locale(), platform.progress(), platform.displayName(), platform.signedIn(), platform.inviteLink(), theSession().hasLocalSnapshot()]);
+        ui.retain!("title-screen", version, () => titleScreen(L0, W));
+      } else {
         header(s, W);
         if (s === "modes") modesScreen(W);
         else if (s === "journey") journeyScreen(Math.min(680, W));
@@ -265,10 +267,13 @@ function screen(L0: Layout): void {
         else if (s === "lessons") lessonsScreen(Math.min(680, W));
         else if (s === "practice") practiceScreen(Math.min(480, W));
         else if (s === "achievements") achievementsScreen(Math.min(680, W));
-        else if (s === "help") helpScreen(W);
+        else if (s === "help") {
+          const version = JSON.stringify([W, locale(), BINDINGS.map(([action]) => keysFor(action))]);
+          ui.retain!("help-screen", version, () => helpScreen(W));
+        }
         else if (s === "settings") settingsScreen(W);
         else if (s === "profile") profileScreen(W);
-        else if (s === "hosted") hostedScreen(W);
+        else if (s === "hosted") ui.retain!("hosted-screen", `${W}|${locale()}`, () => hostedScreen(W));
       }
     }, { width: L0.lw, padding: pad, spacing: 19.2, align: "center", ...(app.screen === "title" ? { height: Math.max(L0.lh, 0), justify: "center" as const } : {}) });
   }, fresh() ? {} : (frame().frame - app.openedFrame < 6 ? { scrollTo: { top: 0 } } : {}));
@@ -678,20 +683,4 @@ function resetSheet(iw: number): void {
     { id: "sheet-first", text: T("cancel"), act: closeSheet },
     { id: "btn-reset-yes", text: T("resetProgress"), style: "danger-btn", act: () => { closeSheet(); resetProgress(); } },
   ], iw, 11.2);
-}
-
-// ------------------------------------------------------------------ toasts (#toasts)
-function toasts(L0: Layout): void {
-  if (!app.toasts.length) return;
-  const maxW = Math.min(L0.lw * 0.88, 60 * 8);
-  const bottom = app.playing && app.screen === "none" && !L0.wide ? 84 : 20;
-  ui.place("toasts", { anchor: "bottom", x: 0, y: bottom }, () => {
-    ui.column("toast-col", () => {
-      app.toasts.forEach((t, i) => {
-        const cls = t.warn ? "toast-warn-text" : "toast-text";
-        const w = Math.min(maxW, tw(t.text, cls) + 38.4 + 2);
-        ui.column(`toast-${i}`, () => para(t.text, w - 38.4 - 2, cls), { style: t.warn ? "toast-warn" : "toast", width: w, align: "center" });
-      });
-    }, { spacing: 8, align: "center" });
-  });
 }
