@@ -1,6 +1,6 @@
 # Three Marks — running specification
 
-Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.44.1, host API minor 44), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
+Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.47.0, host API minor 47), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
 
 ## Modes and content
 - **Learn** — five interactive lessons (Making a Mark, Taking Turns, Complete a Line, The Block, The Honest Draw). Every step needs the player's own action, checked through the rules' legality API; a failed step resets.
@@ -61,3 +61,7 @@ The HUD: objective, turn banner, both clocks on timed rulesets, Pause, the playe
 The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `de-IT`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `nl-BE`, `zh-SG`, `ms-SG`, `nl-NL`, `fi-FI`, `sv-FI`, `id-ID`, `vi-VN`, `ja-JP`, `ta-SG`, `zh-HK`, `yue-HK`, `et-EE`, `ru-FI`, `ru-EE`, `da-DE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `sl-IT`, `fur-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`.
 
 <!-- regional-localization:end -->
+
+Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
+
+Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
