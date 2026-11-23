@@ -1,3 +1,4 @@
+import { showCursor } from "./cursor.ts";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Three Marks on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
@@ -657,6 +658,7 @@ function applyOptions(): void {
   if (!app.playing) audio.ambience(th.ambience);
 }
 onStart(() => {
+  showCursor();
   setFixedRate(60);
   epoch = platform.nowMs();
   initStyles();
