@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T09:42:28.659537+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-26T16:03:59.740132+00:00",
+    "coverArtUpdatedAt": "2026-11-26T22:51:27.123153+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-26T16:03:58.322765+00:00",
+      "deployedAt": "2026-11-26T22:51:27.112324+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.50.0",
+      "engineVersion": "1.51.0",
       "deployWarning": null
     },
     "description": "Take turns marking a three-by-three grid and complete a row, column, or diagonal to win.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-26T16:03:59.134Z",
-  "sourceCommit": "1fea9da35154d00e0e431f496235c48503d0d5ca",
-  "bytesReceived": 2081017,
-  "archiveSha256": "e9906889c31b5aa094c62436aa9d7e2e97973a8fa8bb08e4976faf640cbd5e7d",
+  "publishedAt": "2026-11-26T22:51:27.513Z",
+  "sourceCommit": "ab119c1f689bbfac8e5ac10c50c2a17cdb8ddec1",
+  "bytesReceived": 2081028,
+  "archiveSha256": "0be0439d07338bb42994d568b554b21a77b782d21282a8e223ebc23697061a05",
   "indexSha256": "5812a0c37e0b0fd3264bdb216d2aa1a4798b0319a9e819fa4f9f15d7e0eceffa",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 2081017,
+    "bytesReceived": 2081028,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.50.0",
+    "engineVersion": "1.51.0",
     "deployWarning": null
   },
   "liveVerification": {
