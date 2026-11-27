@@ -1,6 +1,6 @@
 # Three Marks — running specification
 
-Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.51.0, host API minor 51), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
+Three Marks is a turn-based alignment game: two sides alternate marks on a chalk slate (3×3, 4×4 or 5×5) and the first to complete a line of the required length (three, or four on the wide boards) wins; a full board with no line is an honest draw. It is a StarHermit engine **script game** (engine 1.53.0, host API minor 53), played natively by the StarHermit client and in browsers by the engine's web runtime from the same package.
 
 ## Modes and content
 - **Learn** — five interactive lessons (Making a Mark, Taking Turns, Complete a Line, The Block, The Honest Draw). Every step needs the player's own action, checked through the rules' legality API; a failed step resets.
@@ -65,3 +65,5 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
 
 Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
+
+On engine 1.53.0, browser play through WebGL 2 compiles a frame's shader programs together and holds that frame until they are linked, blends skinned meshes in one pass, reuses the window pass's depth, and uses a hardware WebGL 2 context when WebGPU's adapter is software.
